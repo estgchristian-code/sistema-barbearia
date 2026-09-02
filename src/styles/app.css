@@ -1,0 +1,765 @@
+/* ===========================================================================
+   APP — estilos dos módulos de página (compostos sobre o design-system).
+   =========================================================================== */
+
+/* -------------------------------- TOASTS --------------------------------- */
+.toast-pilha {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(380px, calc(100svw - 32px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-md);
+  transform: translateY(8px);
+  opacity: 0;
+}
+
+.toast.entrando {
+  transform: translateY(0);
+  opacity: 1;
+  transition: transform var(--transition), opacity var(--transition);
+}
+
+.toast.saindo {
+  transform: translateY(8px);
+  opacity: 0;
+  transition: transform var(--transition), opacity var(--transition);
+}
+
+.toast-success {
+  border-left-color: var(--success);
+}
+
+.toast-danger {
+  border-left-color: var(--danger);
+}
+
+.toast-warning {
+  border-left-color: var(--warning);
+}
+
+.toast-info {
+  border-left-color: var(--info);
+}
+
+.toast-icone {
+  flex-shrink: 0;
+  font-weight: var(--font-weight-bold);
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.toast-success .toast-icone {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.toast-danger .toast-icone {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.toast-warning .toast-icone {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.toast-info .toast-icone {
+  color: var(--info);
+  background: var(--info-bg);
+}
+
+.toast-texto {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-fechar {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.toast-fechar:hover {
+  color: var(--text-primary);
+}
+
+/* ------------------------------ DASHBOARD -------------------------------- */
+.dashboard-grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.dashboard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  border-top: 3px solid var(--border-strong);
+  transition: border-color var(--transition), transform var(--transition-fast);
+}
+
+.dashboard-card:hover {
+  border-top-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.dashboard-card.destaque {
+  border-top-color: var(--accent);
+  background: linear-gradient(160deg, var(--accent-soft), rgba(217, 142, 55, 0.05) 55%, var(--surface));
+}
+
+.dashboard-card-topo {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dashboard-card-rotulo {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.dashboard-card-icone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+}
+
+.dashboard-card.destaque .dashboard-card-icone {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.dashboard-card-valor {
+  font-size: 32px;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-card-sufixo {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.dashboard-estado {
+  margin-top: 18px;
+}
+
+.dashboard-obs {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+
+/* ------------------------------- AGENDA ---------------------------------- */
+.agenda-controles {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.agenda-data-exibida {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  text-transform: capitalize;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agenda-data-badge-hoje {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  padding: 2px 10px;
+}
+
+.agenda-filtro {
+  margin-left: auto;
+}
+
+/* Cards de agendamento */
+.agenda-card {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  grid-template-areas:
+    'hora corpo status'
+    'hora corpo acoes';
+  gap: 4px 16px;
+  align-items: start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--neutral);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.agenda-card:hover {
+  border-color: var(--border-strong);
+}
+
+.agenda-card.status-pendente {
+  border-left-color: var(--info);
+}
+
+.agenda-card.status-confirmado {
+  border-left-color: var(--accent);
+}
+
+.agenda-card.status-concluido {
+  border-left-color: var(--success);
+}
+
+.agenda-card.status-cancelado {
+  border-left-color: var(--text-muted);
+}
+
+.agenda-card.cancelado .agenda-card-cliente,
+.agenda-card.cancelado .agenda-card-servico,
+.agenda-card.cancelado .agenda-card-barbeiro,
+.agenda-card.cancelado .agenda-card-hora-horario {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.agenda-card-hora {
+  grid-area: hora;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+
+.agenda-card-hora-horario {
+  display: inline-flex;
+  flex-direction: column;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-lg);
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+}
+
+.agenda-card-hora-horario .hora-sep {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.agenda-card-duracao {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.agenda-card-corpo {
+  grid-area: corpo;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agenda-card-cliente {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agenda-card-servico {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+.agenda-card-obs {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: 6px 0 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  overflow-wrap: anywhere;
+}
+
+.agenda-card-status {
+  grid-area: status;
+  justify-self: end;
+}
+
+.agenda-card-acoes {
+  grid-area: acoes;
+  justify-self: end;
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.agenda-card-rodape {
+  grid-area: auto;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Cartão de bloqueio (visual distinto dos agendamentos) */
+.agenda-bloqueio {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  grid-template-areas:
+    'hora corpo'
+    'hora motivo';
+  gap: 2px 16px;
+  align-items: start;
+  background: rgba(22, 26, 33, 0.6);
+  border: 1px dashed var(--border-strong);
+  border-left-style: solid;
+  border-left-width: 4px;
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.agenda-bloqueio.geral {
+  border-left-color: var(--info);
+}
+
+.agenda-bloqueio.especifico {
+  border-left-color: var(--warning);
+}
+
+.agenda-bloqueio-hora {
+  grid-area: hora;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.agenda-bloqueio-hora span {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.agenda-bloqueio-hora strong {
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+}
+
+.agenda-bloqueio-info {
+  grid-area: corpo;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agenda-bloqueio-barbeiro {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agenda-bloqueio-motivo {
+  grid-area: motivo;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Status fixo do novo agendamento */
+.agenda-status-fixo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+/* ------------------------------ CONFIGURAÇÕES ---------------------------- */
+.config-abas {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 20px;
+  max-width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  overflow-x: auto;
+}
+
+.config-aba {
+  font: var(--font-weight-medium) var(--font-size-sm)/1 var(--font-family);
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition);
+}
+
+.config-aba:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.config-aba.ativo {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  font-weight: var(--font-weight-semibold);
+}
+
+.config-secao {
+  margin-bottom: 28px;
+}
+
+.config-secao.oculto {
+  display: none;
+}
+
+.config-secao-titulo h2 {
+  font-size: var(--font-size-xl);
+  margin: 0 0 14px;
+}
+
+.bloqueios-cabecalho {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+/* Horários */
+.horarios-grade {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.horario-linha {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.horario-dia {
+  width: 110px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.horario-aberto-rotulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.horario-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.horario-campo span {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.horario-campo input {
+  font: var(--font-weight-normal) var(--font-size-md)/1.4 var(--font-family);
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+}
+
+.horario-campo input:disabled {
+  opacity: 0.5;
+  background: var(--surface);
+}
+
+.horario-acoes {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.horario-msg {
+  font-size: var(--font-size-sm);
+  color: var(--danger);
+}
+
+.horario-msg.ok {
+  color: var(--success);
+}
+
+/* Bloqueios */
+.bloqueio-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.bloqueio-card.geral {
+  border-left-color: var(--info);
+}
+
+.bloqueio-card.especifico {
+  border-left-color: var(--warning);
+}
+
+.bloqueio-card-periodo {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+}
+
+.bloqueio-card-periodo span {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-weight: var(--font-weight-normal);
+}
+
+.bloqueio-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bloqueio-card-motivo {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.bloqueio-card-acoes {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+/* --------------------------- TABELA RESPONSIVA (CARD) -------------------- */
+@media (max-width: 640px) {
+  .table thead {
+    display: none;
+  }
+
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-wrap {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .table tbody tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 12px;
+    padding: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .table td {
+    border: none;
+    padding: 6px 6px;
+    text-align: left;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+
+  .table .num,
+  .table .acoes {
+    text-align: left;
+  }
+
+  .table .acao-cel {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+/* ------------------------------ AGENDA MOBILE ---------------------------- */
+@media (max-width: 640px) {
+  .agenda-filtro {
+    margin-left: 0;
+    flex: 1 1 100%;
+  }
+
+  .agenda-card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'hora hora'
+      'status status'
+      'corpo corpo'
+      'acoes acoes';
+  }
+
+  .agenda-card-hora {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .agenda-card-status {
+    justify-self: start;
+  }
+
+  .agenda-card-acoes {
+    justify-self: stretch;
+    justify-content: flex-end;
+    margin-top: 8px;
+  }
+
+  .agenda-bloqueio {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'hora'
+      'corpo'
+      'motivo';
+  }
+}
+
+@media (max-width: 720px) {
+  .horario-dia {
+    width: 100%;
+  }
+
+  .horario-acoes {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .bloqueio-card-acoes {
+    margin-left: 0;
+  }
+
+  .bloqueios-cabecalho {
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,277 @@
+:root {
+  --bg: #0f1115;
+  --card: #1a1d24;
+  --card-2: #1f232b;
+  --texto: #f2f2f2;
+  --texto-2: #a7adb8;
+  --borda: #2a2f38;
+  --accent: #f5b50a;
+  --accent-escuro: #c98f00;
+  --pendente: #e8a012;
+  --confirmado: #4d9cff;
+  --concluido: #2ec27e;
+  --cancelado: #f2555a;
+  --erro: #f2555a;
+  --sucesso: #2ec27e;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: radial-gradient(1200px 600px at 50% -10%, #232830 0%, var(--bg) 60%);
+  color: var(--texto);
+  min-height: 100vh;
+  padding: 16px 16px 32px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.container {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.header {
+  text-align: center;
+  padding: 12px 0 20px;
+}
+
+.header .logo {
+  font-size: 44px;
+}
+
+.header h1 {
+  font-size: 22px;
+  color: var(--accent);
+}
+
+.header p {
+  color: var(--texto-2);
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.login {
+  margin-top: 10vh;
+}
+
+.input {
+  width: 100%;
+  padding: 13px 14px;
+  margin-top: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--borda);
+  background: var(--card-2);
+  color: var(--texto);
+  font-size: 15px;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.input::placeholder {
+  color: var(--texto-2);
+}
+
+.btn-primario {
+  width: 100%;
+  margin-top: 16px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-escuro));
+  color: #141414;
+  font-size: 16px;
+  font-weight: 800;
+  border: none;
+  border-radius: 14px;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.btn-primario:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mensagem {
+  font-size: 14px;
+  line-height: 1.5;
+  margin-top: 12px;
+}
+
+.mensagem.ok {
+  color: var(--sucesso);
+}
+
+.mensagem.erro {
+  color: var(--erro);
+}
+
+.topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0 16px;
+}
+
+.topo-titulo h1 {
+  font-size: 20px;
+  color: var(--accent);
+}
+
+.topo-titulo p {
+  color: var(--texto-2);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.btn-sair {
+  background: transparent;
+  color: var(--texto-2);
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-sair:hover {
+  color: var(--texto);
+  border-color: var(--texto-2);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.4fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.stat {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-num {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.stat-label {
+  color: var(--texto-2);
+  font-size: 12px;
+}
+
+.stat.destaque .stat-num {
+  color: var(--accent);
+}
+
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agenda {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-left-width: 4px;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.agenda.pendente  { border-left-color: var(--pendente); }
+.agenda.confirmado { border-left-color: var(--confirmado); }
+.agenda.concluido { border-left-color: var(--concluido); }
+.agenda.cancelado { border-left-color: var(--cancelado); opacity: 0.55; }
+
+.agenda-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.hora {
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--card-2);
+}
+
+.badge.pendente   { color: var(--pendente);   background: rgba(232, 160, 18, 0.12); }
+.badge.confirmado { color: var(--confirmado); background: rgba(77, 156, 255, 0.12); }
+.badge.concluido  { color: var(--concluido);  background: rgba(46, 194, 126, 0.12); }
+.badge.cancelado  { color: var(--cancelado);  background: rgba(242, 85, 90, 0.12); }
+
+.agenda-nome {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.agenda-info {
+  color: var(--texto-2);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mini {
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 7px 12px;
+  border: 1px solid var(--borda);
+  background: var(--card-2);
+  color: var(--texto);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.mini:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mini:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mini.pendente   { color: var(--pendente); }
+.mini.confirmado { color: var(--confirmado); }
+.mini.concluido  { color: var(--concluido); }
+.mini.cancelado  { color: var(--cancelado); }
+.mini.whatsapp   { color: var(--sucesso); border-color: rgba(46, 194, 126, 0.4); }

@@ -1,0 +1,652 @@
+-- =====================================================================
+-- SISTEMA DE GESTÃO DE BARBEARIAS — POLICIES RLS
+-- Plataforma: Supabase (PostgreSQL)
+-- Como executar (POSTERIORMENTE): Supabase Dashboard > SQL Editor.
+--
+-- AVISO:
+--   * Este arquivo NÃO deve ser executado antes da validação da equipe.
+--   * O schema já habilitou RLS nas 7 tabelas; este arquivo apenas define
+--     as policies (e os privilégios mínimos) necessárias para operar.
+--   * Nada aqui é aplicado automaticamente. Nada aqui é executado agora.
+--   * Nesta etapa o papel anon NÃO recebe nenhum acesso: o agendamento
+--     público será feito por meio de servidor (Edge Function), conforme
+--     seção 12.
+--
+-- REGRA CENTRAL DE SEGURANÇA:
+--   * Nunca confiar em barbearia_id enviado pelo frontend.
+--   * Para autenticados, a barbearia é SEMPRE derivada de
+--       profissionais.auth_user_id = auth.uid()
+--     e então  profissionais.barbearia_id.
+--   * Nenhuma policy usa USING (true) / WITH CHECK (true).
+--   * Toda ESCREITA em agendamentos passa por funções RPC (SECURITY
+--     DEFINER) que validam cargo, barbearia e transição de status.
+--     Ver seções 9 (RPCs) e 11 (grants mínimos).
+-- =====================================================================
+
+-- =====================================================================
+-- 1. FUNÇÕES AUXILIARES (SECURITY DEFINER)
+-- =====================================================================
+-- POR QUE SECURITY DEFINER É NECESSÁRIO AQUI:
+--   As policies consultam "profissionais" para identificar o usuário
+--   autenticado (auth.uid()). Se essa consulta fosse feita dentro da
+--   própria policy, ela ficaria sujeita ao RLS de profissionais — e a
+--   policy de profissionais também dependeria de consultar profissionais,
+--   gerando RECURSÃO (ou resultado vazio por causa da própria proteção).
+--
+--   Para quebrar esse ciclo, as funções abaixo rodam como dono (postgres)
+--   e retornam SOMENTE identificação (id/barbearia/booleanos) — não
+--   expõem dados de negócio. Não há escalada de privilégio de dados.
+--
+--   Medidas de segurança (todas as funções deste arquivo):
+--     * security definer + set search_path = '': o caminho de busca fica
+--       vazio, então NENHUMA tabela/objeto é resolvido por convenção — todo
+--       nome precisa ser explicitamente qualificado (public.profissionais,
+--       public.agendamentos, auth.uid()). Isso bloqueia substituição de
+--       schema via search_path do chamador (defesa contra hijacking).
+--     * revoke execute ... from public, anon  +  grant execute SOMENTE
+--       para a role authenticated (ou role específica quando indicado).
+--     * auth.uid() é lido do token JWT (GUC), nunca de parâmetros.
+--     * Os argumentos são tipados (bigint / text / timestamp with time
+--       zone) e os retornos qualificados (public.agendamentos), então o
+--       PostgreSQL rejeita valores fora do esquema esperado.
+
+-- (a) id do profissional ativo do usuário logado
+CREATE OR REPLACE FUNCTION public.profissional_autenticado_id()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT p.id
+  FROM public.profissionais p
+  WHERE p.auth_user_id = auth.uid()
+    AND p.ativo = true
+  LIMIT 1;
+$$;
+
+-- (b) barbearia do usuário logado (nunca vem da requisição)
+CREATE OR REPLACE FUNCTION public.barbearia_profissional_autenticado()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT p.barbearia_id
+  FROM public.profissionais p
+  WHERE p.auth_user_id = auth.uid()
+    AND p.ativo = true
+  LIMIT 1;
+$$;
+
+-- (c) o usuário logado pertence à barbearia informada?
+CREATE OR REPLACE FUNCTION public.usuario_pertence_a_barbearia(p_barbearia bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profissionais p
+    WHERE p.auth_user_id = auth.uid()
+      AND p.barbearia_id = p_barbearia
+      AND p.ativo = true
+  );
+$$;
+
+-- (d) o usuário logado é admin da barbearia informada?
+CREATE OR REPLACE FUNCTION public.usuario_e_admin_da_barbearia(p_barbearia bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profissionais p
+    WHERE p.auth_user_id = auth.uid()
+      AND p.cargo = 'admin'
+      AND p.barbearia_id = p_barbearia
+      AND p.ativo = true
+  );
+$$;
+
+-- (e) o usuário logado é um barbeiro ATIVO (cargo = 'barbeiro')?
+--     Chamada pela RPC destinada ao barbeiro para impedir que um admin
+--     (que também é um profissional ativo) a utilize indevidamente.
+CREATE OR REPLACE FUNCTION public.usuario_e_barbeiro_autenticado()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profissionais p
+    WHERE p.auth_user_id = auth.uid()
+      AND p.cargo = 'barbeiro'
+      AND p.ativo = true
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.profissional_autenticado_id() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.barbearia_profissional_autenticado() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.usuario_pertence_a_barbearia(bigint) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.usuario_e_admin_da_barbearia(bigint) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.usuario_e_barbeiro_autenticado() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.profissional_autenticado_id() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.barbearia_profissional_autenticado() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.usuario_pertence_a_barbearia(bigint) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.usuario_e_admin_da_barbearia(bigint) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.usuario_e_barbeiro_autenticado() TO authenticated;
+
+-- =====================================================================
+-- 2. REGRA DE TRANSIÇÃO DE STATUS (central, usada pelas funções)
+-- =====================================================================
+-- A tabela guarda apenas o status ATUAL. O PostgreSQL não conhece o
+-- status ANTERIOR apenas olhando a linha (uma policy de UPDATE enxerga
+-- só o estado pós-escrita). Para impedir transições inválidas é preciso
+-- conhecer o status anterior — por isso a validação acontece DENTRO da
+-- função (que pode comparar o NEW e o OLD da linha).
+--
+-- Transições permitidas (tabela do plano):
+--   pendente  -> confirmado | cancelado
+--   confirmado-> concluido  | cancelado
+--   (qualquer outra transição é recusada com exceção)
+--
+-- Como a EXCLUSÃO não passa por esta função e o status também não pode
+-- "voltar", a tabela vira um registro de eventos:
+--   cancelado não pode voltar; concluido não pode voltar; nunca se atualiza
+--   um agendamento já finalizado.
+CREATE OR REPLACE FUNCTION public.transicao_status_valida(novo text, atual text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT (atual, novo) IN (
+    ('pendente'  , 'confirmado'),
+    ('pendente'  , 'cancelado'),
+    ('confirmado', 'concluido'),
+    ('confirmado', 'cancelado')
+  );
+$$;
+
+-- =====================================================================
+-- 3. DROP POLICY IF EXISTS (execução segura/idempotente)
+-- =====================================================================
+DROP POLICY IF EXISTS "barbearias_select_propria"          ON public.barbearias;
+DROP POLICY IF EXISTS "barbearias_update_admin"            ON public.barbearias;
+
+DROP POLICY IF EXISTS "profissionais_select_propria"       ON public.profissionais;
+DROP POLICY IF EXISTS "profissionais_write_admin"          ON public.profissionais;
+
+DROP POLICY IF EXISTS "servicos_select_propria"            ON public.servicos;
+DROP POLICY IF EXISTS "servicos_write_admin"               ON public.servicos;
+
+DROP POLICY IF EXISTS "clientes_select_propria"            ON public.clientes;
+DROP POLICY IF EXISTS "clientes_write_admin"               ON public.clientes;
+
+DROP POLICY IF EXISTS "agendamentos_select_propria"        ON public.agendamentos;
+DROP POLICY IF EXISTS "agendamentos_insert_admin"          ON public.agendamentos;
+DROP POLICY IF EXISTS "agendamentos_update_admin"          ON public.agendamentos;
+DROP POLICY IF EXISTS "agendamentos_update_status_barbeiro" ON public.agendamentos;
+DROP POLICY IF EXISTS "agendamentos_delete_admin"          ON public.agendamentos;
+
+DROP POLICY IF EXISTS "horarios_select_propria"            ON public.horarios_funcionamento;
+DROP POLICY IF EXISTS "horarios_write_admin"               ON public.horarios_funcionamento;
+
+DROP POLICY IF EXISTS "bloqueios_select_propria"           ON public.bloqueios_agenda;
+DROP POLICY IF EXISTS "bloqueios_write_admin"              ON public.bloqueios_agenda;
+
+-- =====================================================================
+-- 4. POLICIES — barbearias
+-- =====================================================================
+CREATE POLICY "barbearias_select_propria"
+  ON public.barbearias
+  FOR SELECT TO authenticated
+  USING (public.usuario_pertence_a_barbearia(id));
+
+CREATE POLICY "barbearias_update_admin"
+  ON public.barbearias
+  FOR UPDATE TO authenticated
+  USING (public.usuario_e_admin_da_barbearia(id))
+  WITH CHECK (public.usuario_e_admin_da_barbearia(id));
+
+-- =====================================================================
+-- 5. POLICIES — profissionais
+-- =====================================================================
+CREATE POLICY "profissionais_select_propria"
+  ON public.profissionais
+  FOR SELECT TO authenticated
+  USING (public.usuario_pertence_a_barbearia(barbearia_id));
+
+CREATE POLICY "profissionais_write_admin"
+  ON public.profissionais
+  FOR ALL TO authenticated
+  USING (public.usuario_e_admin_da_barbearia(barbearia_id))
+  WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
+
+-- =====================================================================
+-- 6. POLICIES — servicos
+-- =====================================================================
+CREATE POLICY "servicos_select_propria"
+  ON public.servicos
+  FOR SELECT TO authenticated
+  USING (public.usuario_pertence_a_barbearia(barbearia_id));
+
+CREATE POLICY "servicos_write_admin"
+  ON public.servicos
+  FOR ALL TO authenticated
+  USING (public.usuario_e_admin_da_barbearia(barbearia_id))
+  WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
+
+-- =====================================================================
+-- 7. POLICIES — clientes
+-- =====================================================================
+CREATE POLICY "clientes_select_propria"
+  ON public.clientes
+  FOR SELECT TO authenticated
+  USING (
+    public.usuario_e_admin_da_barbearia(barbearia_id)
+    OR (
+      public.barbearia_profissional_autenticado() = barbearia_id
+      AND EXISTS (
+        SELECT 1 FROM public.agendamentos a
+        WHERE a.cliente_id = clientes.id
+          AND a.barbeiro_id = public.profissional_autenticado_id()
+      )
+    )
+  );
+
+CREATE POLICY "clientes_write_admin"
+  ON public.clientes
+  FOR ALL TO authenticated
+  USING (public.usuario_e_admin_da_barbearia(barbearia_id))
+  WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
+
+-- =====================================================================
+-- 8. POLICIES — agendamentos
+-- =====================================================================
+-- IMPORTANTE: NÃO existe policy de UPDATE nem de INSERT/DELETE direto
+-- para "authenticated" em agendamentos. Toda escrita em agendamentos passa
+-- pelas funções RPC da seção 9 (que controlam cargo + colunas + transição
+-- de status). Mantemos apenas a policy de LEITURA abaixo.
+
+-- Leitura: admin vê TODOS da própria barbearia; barbeiro vê SÓ os seus.
+CREATE POLICY "agendamentos_select_propria"
+  ON public.agendamentos
+  FOR SELECT TO authenticated
+  USING (
+    public.usuario_e_admin_da_barbearia(barbearia_id)
+    OR barbeiro_id = public.profissional_autenticado_id()
+  );
+
+-- (Sem policies de INSERT/UPDATE/DELETE de agendamentos para não abrir
+--  um caminho direto que contorne as funções RPC.)
+
+-- =====================================================================
+-- 9. FUNÇÕES RPC — ESCRITA EM agendamentos
+-- =====================================================================
+-- POR QUE FUNÇÕES SÃO NECESSÁRIAS AQUI:
+--   * Não existe, no PostgreSQL, uma forma de RLS dizer "só pode atualizar
+--     estas colunas". RLS enxerga a linha inteira (USING/WITH CHECK) e não
+--     distingue coluna. A restrição de coluna é feita por GRANT ou por
+--     camada acima (função).
+--   * Já demonstramos que GRANT de tabela inteira dá todas as colunas ao
+--     barbeiro. GRANT por coluna também não funciona: basta conceder
+--     QUALQUER UPDATE de tabela e o barbeiro escreve qualquer coluna;
+--     conceder apenas colunas ao barbeiro impede o admin de fazer UPDATE
+--     completo — e não dá para dar "todas" a um role e "algumas" a outro.
+--   * A transição de status só é validável conhecendo o status ANTERIOR
+--     (OLD), que uma policy não enxerga.
+--   * Conclusão: a escrita em agendamentos passa a ocorrer APENAS por
+--     funções SQL (RPC) com security definer. Dentro delas validamos:
+--       - quem está chamando (cargo/barbearia derivados de auth.uid());
+--       - QUAIS colunas são escritas (o conjunto é FIXO por função);
+--       - a transição de status (OLD vs NEW).
+--     Sem QUALQUER GRANT de INSERT/UPDATE/DELETE de tabela para os roles,
+--     ninguém contorna a função por fora.
+
+-- ------------------------------------------------------------------
+-- 9.1 ADMIN — atualizar agendamento (todas as colunas operáveis)
+-- ------------------------------------------------------------------
+-- O admin só mexe em agendamentos da PRÓPRIA barbearia. Recebemos os
+-- valores operáveis (barbeiro, serviço, cliente, horários, status,
+-- observações). O id e a barbearia nunca são sobreescritos pelo cliente.
+-- Confirma-se que o agendamento pertence à barbearia do admin e que a
+-- transição de status é válida. Retorna os dados atualizados.
+CREATE OR REPLACE FUNCTION public.admin_atualizar_agendamento(
+  p_agendamento_id bigint,
+  p_barbeiro_id bigint,
+  p_servico_id bigint,
+  p_cliente_id bigint,
+  p_data_hora_inicio timestamp with time zone,
+  p_data_hora_fim timestamp with time zone,
+  p_status text,
+  p_observacoes text
+)
+RETURNS public.agendamentos
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_agendamento public.agendamentos;
+BEGIN
+  UPDATE public.agendamentos a
+     SET barbeiro_id      = p_barbeiro_id,
+         servico_id       = p_servico_id,
+         cliente_id       = p_cliente_id,
+         data_hora_inicio = p_data_hora_inicio,
+         data_hora_fim    = p_data_hora_fim,
+         status           = p_status,
+         observacoes      = p_observacoes
+   WHERE a.id = p_agendamento_id
+     AND public.usuario_e_admin_da_barbearia(a.barbearia_id)
+     AND (
+       p_status = a.status                              -- status inalterado
+       OR public.transicao_status_valida(p_status, a.status)
+     )
+  RETURNING * INTO v_agendamento;
+
+  IF v_agendamento.id IS NULL THEN
+    RAISE EXCEPTION 'agendamento não encontrado, pertence a outra barbearia ou transição de status inválida';
+  END IF;
+
+  RETURN v_agendamento;
+END;
+$$;
+
+-- ------------------------------------------------------------------
+-- 9.2 ADMIN — criar agendamento
+-- ------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.admin_criar_agendamento(
+  p_barbearia_id bigint,
+  p_barbeiro_id bigint,
+  p_servico_id bigint,
+  p_cliente_id bigint,
+  p_data_hora_inicio timestamp with time zone,
+  p_data_hora_fim timestamp with time zone,
+  p_status text,
+  p_observacoes text
+)
+RETURNS public.agendamentos
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_agendamento public.agendamentos;
+BEGIN
+  -- Só pode criar se o próprio admin pertence à barbearia informada.
+  IF NOT public.usuario_e_admin_da_barbearia(p_barbearia_id) THEN
+    RAISE EXCEPTION 'somente admin da própria barbearia pode criar agendamento';
+  END IF;
+
+  -- Novo agendamento começa SÓ como 'pendente' (não admite outros status
+  -- no momento da criação; para confirmar/alterar usa admin_atualizar).
+  IF p_status IS NOT NULL AND p_status <> 'pendente' THEN
+    RAISE EXCEPTION 'novo agendamento deve iniciar com status pendente';
+  END IF;
+
+  INSERT INTO public.agendamentos (
+    barbearia_id, barbeiro_id, servico_id, cliente_id,
+    data_hora_inicio, data_hora_fim, status, observacoes
+  ) VALUES (
+    p_barbearia_id, p_barbeiro_id, p_servico_id, p_cliente_id,
+    p_data_hora_inicio, p_data_hora_fim,
+    COALESCE(p_status, 'pendente'), p_observacoes
+  )
+  RETURNING * INTO v_agendamento;
+
+  RETURN v_agendamento;
+END;
+$$;
+
+-- ------------------------------------------------------------------
+-- 9.3 ADMIN — excluir agendamento
+-- ------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.admin_excluir_agendamento(p_agendamento_id bigint)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  DELETE FROM public.agendamentos a
+   WHERE a.id = p_agendamento_id
+     AND public.usuario_e_admin_da_barbearia(a.barbearia_id);
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'agendamento não encontrado ou pertence a outra barbearia';
+  END IF;
+END;
+$$;
+
+-- ------------------------------------------------------------------
+-- 9.4 BARBEIRO — atualizar SOMENTE status/observacoes dos PRÓPRIOS
+-- ------------------------------------------------------------------
+-- Esta é a única forma de um barbeiro alterar um agendamento. Ela:
+--   1. exige que o usuário autenticado tenha cargo = 'barbeiro' (o admin,
+--      mesmo sendo um profissional ativo, NÃO pode usar esta RPC);
+--   2. só aceita agendamentos em que barbeiro_id = o próprio barbeiro;
+--   3. só escreve NAS colunas status e observacoes (fixo no comando);
+--   4. valida a transição com base no status anterior (OLD);
+--   5. rejeita qualquer tentativa de tocar id/barbearia/cliente/barbeiro/
+--      servico/horários/created_at/updated_at (colunas fora do SET/batch).
+CREATE OR REPLACE FUNCTION public.barbeiro_atualizar_status(
+  p_agendamento_id bigint,
+  p_novo_status text,
+  p_novas_observacoes text DEFAULT NULL
+)
+RETURNS public.agendamentos
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_id      bigint := public.profissional_autenticado_id();
+  v_agendamento public.agendamentos;
+BEGIN
+  IF v_id IS NULL OR NOT public.usuario_e_barbeiro_autenticado() THEN
+    RAISE EXCEPTION 'somente um barbeiro ativo pode alterar o status de agendamentos';
+  END IF;
+
+  UPDATE public.agendamentos a
+     SET status      = p_novo_status,
+         observacoes = COALESCE(p_novas_observacoes, a.observacoes)
+   WHERE a.id = p_agendamento_id
+     AND a.barbeiro_id = v_id                     -- SÓ os próprios
+     AND (
+       p_novo_status = a.status                   -- ex.: só atualizar obs.
+       OR public.transicao_status_valida(p_novo_status, a.status)
+     )
+  RETURNING * INTO v_agendamento;
+
+  IF v_agendamento.id IS NULL THEN
+    RAISE EXCEPTION 'agendamento não encontrado, não pertence a este barbeiro ou transição de status inválida';
+  END IF;
+
+  RETURN v_agendamento;
+END;
+$$;
+
+-- Grants de execução: somente authenticated (sem acesso para anon/public).
+REVOKE ALL ON FUNCTION public.transicao_status_valida(text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_atualizar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_criar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_excluir_agendamento(bigint) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.barbeiro_atualizar_status(bigint, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.transicao_status_valida(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_atualizar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_criar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_excluir_agendamento(bigint) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.barbeiro_atualizar_status(bigint, text, text) TO authenticated;
+
+-- =====================================================================
+-- 10. POLICIES — horarios_funcionamento e bloqueios_agenda
+-- =====================================================================
+CREATE POLICY "horarios_select_propria"
+  ON public.horarios_funcionamento
+  FOR SELECT TO authenticated
+  USING (public.usuario_pertence_a_barbearia(barbearia_id));
+
+CREATE POLICY "horarios_write_admin"
+  ON public.horarios_funcionamento
+  FOR ALL TO authenticated
+  USING (public.usuario_e_admin_da_barbearia(barbearia_id))
+  WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
+
+CREATE POLICY "bloqueios_select_propria"
+  ON public.bloqueios_agenda
+  FOR SELECT TO authenticated
+  USING (public.usuario_pertence_a_barbearia(barbearia_id));
+
+CREATE POLICY "bloqueios_write_admin"
+  ON public.bloqueios_agenda
+  FOR ALL TO authenticated
+  USING (public.usuario_e_admin_da_barbearia(barbearia_id))
+  WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
+
+-- =====================================================================
+-- 11. GRANTS — PRIVILÉGIOS MÍNIMOS
+-- =====================================================================
+-- RLS e privilégios SQL são camadas DIFERENTES:
+--   * RLS decide QUAIS LINHAS cada role enxerga;
+--   * GRANT decide QUAIS COMANDOS/COLUNAS a role pode tentar.
+--
+-- PARA agendamentos (ponto crítico):
+--   NENHUM GRANT de INSERT/UPDATE/DELETE (nem de tabela, nem de coluna)
+--   é concedido a quaisquer roles. Sem privilégio de escrita, o PostgreSQL
+--   recusa
+--   qualquer INSERT/UPDATE/DELETE direto ("permission denied for table"),
+--   inclusive de colunas. Assim o barbeiro NÃO tem como gravar
+--   id/barbearia_id/cliente_id/barbeiro_id/servico_id/data_hora_*/
+--   created_at/updated_at: ele nem consegue executar UPDATE algum.
+--   A única via de escrita é RPC (seção 9), que internamente reescreve
+--   somente as colunas permitidas (status/observacoes para o barbeiro) e
+--   valida cargo/barbearia/transição.
+--
+-- As funções RPC rodam com security definer (dono), por isso conseguem
+-- escrever sem depender de GRANT — mas o chamador, sem GRANT de TABELA,
+-- jamais contorna a função diretamente.
+
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+
+-- Leitura: todas as tabelas de negócio (linhas limitadas por RLS).
+GRANT SELECT ON public.barbearias, public.profissionais, public.servicos,
+  public.clientes, public.agendamentos,
+  public.horarios_funcionamento, public.bloqueios_agenda TO authenticated;
+
+-- Escrita nas demais tabelas (fora de agendamentos):
+--   * profissionais/servicos/clientes/horarios/bloqueios: admin usa
+--     (linhas restritas por RLS via usuario_e_admin_da_barbearia).
+--   * barbearias: admin edita a própria (UPDATE); ninguém cria/exclui
+--     barbearia pela API.
+--   * agendamentos: NÃO ENTRA AQUI (fica sem INSERT/UPDATE/DELETE para
+--     não dar ao barbeiro um caminho de escrita de qualquer coluna).
+GRANT INSERT, UPDATE, DELETE ON public.profissionais, public.servicos,
+  public.clientes, public.horarios_funcionamento, public.bloqueios_agenda
+  TO authenticated;
+GRANT UPDATE ON public.barbearias TO authenticated;
+
+-- =====================================================================
+-- 12. FLUXO PÚBLICO (ADIADO — via Edge Function numa etapa futura)
+-- =====================================================================
+-- MOTIVO DA DECISÃO:
+--   * agendamentos.cliente_id é NOT NULL com FK composta para clientes:
+--     o fluxo público precisa LOCALIZAR ou CRIAR o cliente ANTES de
+--     inserir o agendamento.
+--   * uma policy anon de INSERT em clientes abriria a base para poluição.
+--   * portanto NÃO há, nesta etapa, policy/GRANT para anon em clientes
+--     nem em agendamentos.
+--
+-- DECISÃO DE ARQUITETURA:
+--   O agendamento público será criado por uma Supabase Edge Function com
+--   role service_role (ignora RLS). Ela será responsável por:
+--     1. validar os dados de entrada (forma/conteúdo);
+--     2. LOCALIZAR o cliente por telefone/e-mail OU CRIAR o registro em
+--        public.clientes (mesma barbearia, ativo);
+--     3. validar que a barbearia existe e está ativa;
+--     4. validar que o serviço pertence à MESMA barbearia e está ativo;
+--     5. validar que o profissional pertence à mesma barbearia e está ativo;
+--     6. validar o horário: futuro, dentro do horário de funcionamento e
+--        sem conflito com bloqueios_agenda;
+--     7. CRIAR o agendamento com status 'pendente' — o conflito de
+--        intervalo é garantido pela constraint ux_agendamentos_sem_conflito,
+--        não pela aplicação.
+--
+--   O anon (site público) NÃO possuirá SELECT/INSERT/UPDATE/DELETE direto;
+--   a comunicação é exclusivamente via HTTP à Edge Function.
+
+-- =====================================================================
+-- 13. MATRIZ DE TESTES (comentada — executar no SQL Editor depois)
+-- =====================================================================
+-- Pré-requisitos:
+--   * 2 barbearias (A e B) com dados;
+--   * profissionais preenchidos com auth_user_id do Supabase Auth;
+--   * 1 admin (barbearia A), 1 barbeiro (barbearia A), 1 usuário (B).
+--
+-- Simulação de papel no SQL Editor:
+--   set role authenticated;
+--   select set_config('request.jwt.claims',
+--     '{"sub":"<auth_user_id>","role":"authenticated",
+--       "iat":1710000000,"exp":1710003600}', true);  -- trocar sub conforme teste
+--
+-- ATENÇÃO: ajustar ids conforme dados reais criados manualmente.
+--
+-- ------------------------------------------------------------------
+-- A) ANON — nenhum acesso nesta etapa
+-- ------------------------------------------------------------------
+-- select * from public.agendamentos;                                  -- negado
+-- insert into public.agendamentos (...) values (...);                 -- negado
+-- select public.admin_criar_agendamento(...);                         -- sem EXECUTE
+
+-- ------------------------------------------------------------------
+-- B) ADMIN — barbearia A
+-- ------------------------------------------------------------------
+-- select * from public.agendamentos;                    -- só barbearia A
+-- select public.admin_atualizar_agendamento(id, b, s, c, ini, fim,
+--        'confirmado', 'obs');                                     -- OK
+-- select public.admin_atualizar_agendamento(id, ..., 'pendente', ...)
+--   quando atual = 'confirmado';                       -- erro (transição)
+-- select public.admin_criar_agendamento(...);                      -- OK
+-- select public.admin_excluir_agendamento(id);                     -- OK
+-- UPDATE direto:  update public.agendamentos set ...               -- negado
+--   (não há GRANT de UPDATE para a tabela + sem policy de UPDATE)
+-- leitura/escrita de agendamento da barbearia B -> 0 linhas/negado
+
+-- ------------------------------------------------------------------
+-- C) BARBEIRO — barbearia A
+-- ------------------------------------------------------------------
+-- select * from public.agendamentos;  -> somente os PRÓPRIOS
+-- select public.barbeiro_atualizar_status(id, 'confirmado');
+--   -> OK (próprio, pendente->confirmado)
+-- select public.barbeiro_atualizar_status(id, 'concluido');
+--   -> OK (próprio, confirmado->concluido)
+-- select public.barbeiro_atualizar_status(id, 'pendente');
+--   -> erro (transição inválida: concluido->pendente)
+-- select public.barbeiro_atualizar_status(id, 'concluido') de um
+--   agendamento de OUTRO barbeiro -> erro (nenhuma linha atende)
+-- UPDATE direto:  update public.agendamentos
+--        set data_hora_inicio = ... ;                 -- negado
+--   atribuindo cliente_id/barbeiro_id/servico_id/data_hora_*   -> negado
+--   (sem GRANT de UPDATE de tabela: "permission denied for table
+--    agendamentos"; o PostgreSQL recusa a escrita de qualquer coluna)
+-- select public.admin_atualizar_agendamento(...) -> erro se o barbeiro
+--   tentar (função checa cargo admin; RAISE EXCEPTION)
+-- NÃO existe função que permita ao barbeiro escrever id/cliente/
+--   barbeiro/servico/horários.
+
+-- ------------------------------------------------------------------
+-- D) USUÁRIO BARBEARIA B
+-- ------------------------------------------------------------------
+-- select * de qualquer tabela -> somente dados da barbearia B
+-- select * from agendamentos -> somente os próprios
+-- tenta alterar dados da barbearia A -> 0 linhas / negado
+
+-- FIM: reset role;
+-- =====================================================================

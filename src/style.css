@@ -1,0 +1,6 @@
+/* ===========================================================================
+   PONTO DE ENTRADA DE ESTILOS — SPA da barbearia.
+   Todo o visual é composto pelo design system + módulos de página.
+   =========================================================================== */
+@import './styles/design-system.css';
+@import './styles/app.css';

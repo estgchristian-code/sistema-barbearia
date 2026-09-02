@@ -1,0 +1,51 @@
+# ===========================================================================
+# Configuração do projeto Supabase (Supabase CLI).
+# Deploy da Edge Function pública:
+#   supabase functions deploy criar-agendamento --no-verify-jwt
+#
+# Esta rota é PÚBLICA (sem JWT). A segurança fica toda na função, que roda
+# no servidor com a chave service_role / connection string.
+# ===========================================================================
+
+project_id = "lcmvzxnsgnvclynpwpoa"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[email]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+# Em produção, substituir pelo domínio da aplicação pública:
+# additional_redirect_urls = ["https://agenda.suaempresa.com.br"]
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+
+# ===========================================================================
+# Edge Function "criar-agendamento"
+#
+# IMPORTANTE: rota pública — verify_jwt = false.
+# Se o Domínio do Vite/Vercel não for configurado no CORS, a chamada é
+# recusada (403). Configurar PUBLIC_ORIGINS no painel Supabase:
+#   Settings > Edge Functions > Secrets:
+#     PUBLIC_ORIGINS = "https://agenda.suaempresa.com.br,http://localhost:5173"
+#     PUBLIC_TIMEZONE = "America/Sao_Paulo"   (fuso local da barbearia)
+# ===========================================================================
+[functions.criar-agendamento]
+verify_jwt = false

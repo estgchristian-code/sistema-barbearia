@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>Barbearia - Administração</title>
+  <link rel="stylesheet" href="./admin.css" />
+</head>
+<body>
+  <main class="container">
+
+    <section id="tela-login" class="card login" hidden>
+      <div class="header">
+        <div class="logo">💈</div>
+        <h1>Área do Barbeiro</h1>
+        <p>Faça login para gerenciar os agendamentos</p>
+      </div>
+      <form id="form-login" novalidate>
+        <input type="email" id="email" class="input" placeholder="E-mail" autocomplete="username" />
+        <input type="password" id="senha" class="input" placeholder="Senha" autocomplete="current-password" />
+        <button type="submit" id="btn-entrar" class="btn-primario">Entrar</button>
+      </form>
+      <p id="msg-login" class="mensagem" hidden></p>
+    </section>
+
+    <section id="tela-painel" hidden>
+      <header class="topo">
+        <div class="topo-titulo">
+          <h1>Agendamentos</h1>
+          <p id="data-hoje"></p>
+        </div>
+        <button id="btn-sair" class="btn-sair" type="button">Sair</button>
+      </header>
+
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-num" id="total-agendamentos">0</span>
+          <span class="stat-label">Hoje</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="total-concluidos">0</span>
+          <span class="stat-label">Concluídos</span>
+        </div>
+        <div class="stat destaque">
+          <span class="stat-num" id="faturamento">R$ 0,00</span>
+          <span class="stat-label">Faturamento do dia</span>
+        </div>
+      </div>
+
+      <div id="lista" class="lista"></div>
+      <p id="msg-lista" class="mensagem" hidden></p>
+    </section>
+
+  </main>
+
+  <script type="module" src="./admin.js"></script>
+</body>
+</html>
