@@ -89,6 +89,9 @@ export async function obterDadosSuporteAgenda() {
 // RPC: admin_criar_agendamento. O status é sempre 'pendente' na criação
 // (o banco REJEITA qualquer outro status em admin_criar_agendamento).
 export async function criarAgendamento(dados) {
+  const erroValidacao = validarDadosAgendamento(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const { barbeariaId } = await obterContexto();
 
   const { data, error } = await supabase.rpc('admin_criar_agendamento', {
@@ -109,6 +112,9 @@ export async function criarAgendamento(dados) {
 // RPC: admin_atualizar_agendamento. A transição de status é validada no banco
 // a partir do status ANTERIOR da linha.
 export async function atualizarAgendamento(id, dados) {
+  const erroValidacao = validarDadosAgendamento(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const { data, error } = await supabase.rpc('admin_atualizar_agendamento', {
     p_agendamento_id: id,
     p_barbeiro_id: dados.barbeiro_id,
@@ -132,10 +138,43 @@ export async function excluirAgendamento(id) {
   if (error) throw error;
 }
 
+// RPC: barbeiro_atualizar_status. Permite ao barbeiro alterar SOMENTE
+// status e observacoes dos PRÓPRIOS agendamentos.
+export async function barbeiroAtualizarStatus(id, novoStatus, novasObservacoes) {
+  const { data, error } = await supabase.rpc('barbeiro_atualizar_status', {
+    p_agendamento_id: id,
+    p_novo_status: novoStatus,
+    p_novas_observacoes: novasObservacoes ?? null,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+// Validação de negócio comum a criação e edição (defesa em profundidade antes
+// da RPC). O banco continua sendo a autoridade final sobre conflitos e
+// transições de status; aqui barramos dados claramente inconsistentes.
+function validarDadosAgendamento(dados) {
+  if (!dados.barbeiro_id) return 'Selecione um barbeiro.';
+  if (!dados.servico_id) return 'Selecione um serviço.';
+  if (!dados.cliente_id) return 'Selecione um cliente.';
+
+  const inicio = dados.data_hora_inicio;
+  const fim = dados.data_hora_fim;
+  if (!(inicio instanceof Date) || Number.isNaN(inicio.getTime())) {
+    return 'Informe data e hora inicial válidas.';
+  }
+  if (!(fim instanceof Date) || Number.isNaN(fim.getTime())) {
+    return 'Informe data e hora final válidas.';
+  }
+  if (fim <= inicio) return 'O horário final deve ser posterior ao inicial.';
+
+  return null;
+}
+
 // ------------------------- Erros amigáveis -------------------------
 
-export function mensagemErroAgendamento(erro) {
-  const msg = (erro?.message || '').toLowerCase();
+export function mensagemErroAgendamento(erro) {  const msg = (erro?.message || '').toLowerCase();
   const codigo = erro?.code;
 
   // 23P01 = exclusion_violation (ux_agendamentos_sem_conflito).
@@ -161,6 +200,10 @@ export function mensagemErroAgendamento(erro) {
 
   if (msg.includes('somente admin') || msg.includes('administrador')) {
     return 'Somente um administrador desta barbearia pode realizar esta operação.';
+  }
+
+  if (msg.includes('somente um barbeiro ativo')) {
+    return 'Somente um barbeiro ativo pode alterar o status de seus agendamentos.';
   }
 
   if (msg.includes('não encontrado') || msg.includes('pertence a outra barbearia')) {

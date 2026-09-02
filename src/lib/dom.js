@@ -122,3 +122,11 @@ export function criarCampoFormulario(rotulo, controle) {
 export function paraArray(lista) {
   return Array.from(lista || []);
 }
+
+// Estado de carregamento reutilizável (spinner + rótulo opcional).
+export function criarEstado(texto) {
+  return criarElemento('div', { class: 'loading' }, [
+    criarElemento('span', { class: 'spinner' }),
+    criarElemento('span', { text: texto }),
+  ]);
+}

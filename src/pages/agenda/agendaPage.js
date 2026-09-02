@@ -4,12 +4,14 @@ import {
   criarAgendamento,
   atualizarAgendamento,
   excluirAgendamento,
+  barbeiroAtualizarStatus,
   mensagemErroAgendamento,
 } from '../../services/agendamentoService.js';
 import { listarBloqueiosDoDia } from '../../services/bloqueioService.js';
 import { verificarDisponibilidade } from '../../services/disponibilidadeService.js';
-import { criarElemento, criarCampoFormulario } from '../../lib/dom.js';
+import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
 import { abrirModal, criarMensagem, abrirModalConfirmacao } from '../../components/modal.js';
+import { toastSucesso, toastErro } from '../../components/toast.js';
 
 const DESCRICAO_STATUS = {
   pendente: 'Pendente',
@@ -45,6 +47,7 @@ const BADGE_STATUS = {
 export async function renderizarAgenda(conteudo, contexto) {
   const { profissional } = contexto;
   const ehAdmin = profissional?.cargo === 'admin';
+  const idBarbeiroLogado = profissional?.id;
 
   conteudo.innerHTML = '';
 
@@ -76,7 +79,7 @@ export async function renderizarAgenda(conteudo, contexto) {
 
   if (!ehAdmin) {
     conteudo.append(
-      criarElemento('p', { class: 'alert alert-info', text: 'Somente administradores podem criar, editar ou excluir agendamentos.' })
+      criarElemento('p', { class: 'alert alert-info', text: 'Você pode visualizar seus agendamentos e alterar o status deles.' })
     );
   }
 
@@ -154,7 +157,7 @@ export async function renderizarAgenda(conteudo, contexto) {
     }
 
     for (const a of doDia) {
-      lista.append(montarCartaoAgendamento(a, suporte, { ehAdmin, aoEditar, aoExcluir }));
+      lista.append(montarCartaoAgendamento(a, suporte, { ehAdmin, idBarbeiroLogado, aoEditar, aoExcluir, aoAtualizarStatus, aoEditarObs }));
     }
   }
 
@@ -182,6 +185,68 @@ export async function renderizarAgenda(conteudo, contexto) {
         atualizarLista();
       },
     });
+  }
+
+  function aoAtualizarStatus(agendamento, novoStatus) {
+    const rotulos = { confirmado: 'confirmar', concluido: 'concluir', cancelado: 'cancelar' };
+    const nomeCliente = nomePorId(suporte.clientes, agendamento.cliente_id);
+
+    abrirModalConfirmacao({
+      titulo: `${rotulos[novoStatus] || 'Alterar'} agendamento`,
+      mensagem: `${rotulos[novoStatus] ? rotulos[novoStatus].charAt(0).toUpperCase() + rotulos[novoStatus].slice(1) : 'Alterar'} o agendamento de ${nomeCliente}?`,
+      rotuloConfirmar: rotulos[novoStatus] || 'Confirmar',
+      variante: novoStatus === 'cancelado' ? 'danger' : 'primary',
+      aoConfirmar: async () => {
+        try {
+          await barbeiroAtualizarStatus(agendamento.id, novoStatus);
+        } catch (erro) {
+          throw new Error(mensagemErroAgendamento(erro));
+        }
+        toastSucesso(`Agendamento ${novoStatus === 'cancelado' ? 'cancelado' : 'atualizado'} com sucesso.`);
+        atualizarLista();
+      },
+    });
+  }
+
+  function aoEditarObs(agendamento) {
+    const msgErro = criarMensagem('danger');
+    const areaObs = criarElemento('textarea', { name: 'observacoes', rows: 4, class: 'input' });
+    if (agendamento.observacoes) areaObs.value = agendamento.observacoes;
+
+    const form = criarElemento('form', { id: 'form-obs-barbeiro' }, [
+      criarCampoFormulario('Observações', areaObs),
+      msgErro,
+    ]);
+
+    const btnCancelar = criarElemento('button', { type: 'button', class: 'btn btn-secondary', text: 'Cancelar' });
+    const btnSalvar = criarElemento('button', { type: 'button', class: 'btn btn-primary', text: 'Salvar' });
+
+    const modal = abrirModal({
+      titulo: 'Editar observações',
+      tamanho: 'sm',
+      corpo: [form],
+      rodape: [btnCancelar, btnSalvar],
+    });
+
+    async function salvar() {
+      msgErro.limpar();
+      btnSalvar.disabled = true;
+      btnSalvar.textContent = 'Salvando…';
+      try {
+        await barbeiroAtualizarStatus(agendamento.id, agendamento.status, areaObs.value.trim());
+        toastSucesso('Observações atualizadas com sucesso.');
+        modal.fechar();
+        atualizarLista();
+      } catch (erro) {
+        msgErro.definir(mensagemErroAgendamento(erro));
+        btnSalvar.disabled = false;
+        btnSalvar.textContent = 'Salvar';
+      }
+    }
+
+    btnCancelar.addEventListener('click', modal.fechar);
+    btnSalvar.addEventListener('click', salvar);
+    form.addEventListener('submit', (e) => { e.preventDefault(); salvar(); });
   }
 
   btnAnterior.addEventListener('click', () => mudarData(-1));
@@ -227,7 +292,18 @@ export async function renderizarAgenda(conteudo, contexto) {
 
 // ------------------------- Cartão de agendamento -------------------------
 
-function montarCartaoAgendamento(a, suporte, { ehAdmin, aoEditar, aoExcluir }) {
+const ACOES_POR_STATUS = {
+  pendente: [
+    { status: 'confirmado', rotulo: 'Confirmar', variante: 'btn-primary' },
+    { status: 'cancelado', rotulo: 'Cancelar', variante: 'btn-danger' },
+  ],
+  confirmado: [
+    { status: 'concluido', rotulo: 'Concluir', variante: 'btn-success' },
+    { status: 'cancelado', rotulo: 'Cancelar', variante: 'btn-danger' },
+  ],
+};
+
+function montarCartaoAgendamento(a, suporte, { ehAdmin, idBarbeiroLogado, aoEditar, aoExcluir, aoAtualizarStatus, aoEditarObs }) {
   const cancelado = a.status === 'cancelado';
   const classeStatus = STATUS_CLASSE[a.status] || 'pendente';
 
@@ -258,6 +334,22 @@ function montarCartaoAgendamento(a, suporte, { ehAdmin, aoEditar, aoExcluir }) {
     btnEditar.addEventListener('click', () => aoEditar(a));
     btnExcluir.addEventListener('click', () => aoExcluir(a));
     acoes.push(btnEditar, btnExcluir);
+  } else {
+    if (a.barbeiro_id === idBarbeiroLogado) {
+      const transicoes = ACOES_POR_STATUS[a.status] || [];
+      for (const t of transicoes) {
+        const btn = criarElemento('button', { type: 'button', class: `btn ${t.variante} btn-sm`, text: t.rotulo });
+        btn.addEventListener('click', () => {
+          aoAtualizarStatus(a, t.status);
+        });
+        acoes.push(btn);
+      }
+      const btnObs = criarElemento('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'Obs' });
+      btnObs.addEventListener('click', () => {
+        aoEditarObs(a);
+      });
+      acoes.push(btnObs);
+    }
   }
 
   const card = criarElemento('article', {
@@ -517,7 +609,15 @@ function validarFormulario(dados, ehEdicao, suporte) {
   if (!dados.cliente_id) return 'Selecione um cliente.';
   if (!dados.barbeiro_id) return 'Selecione um barbeiro.';
   if (!dados.servico_id) return 'Selecione um serviço.';
-  if (!dados.data_hora_inicio) return 'Informe data e hora inicial.';
+
+  // Date inválida (data/hora vazia ou malformada) nunca passa nesta checagem:
+  // um Date inválido não é "falsy". Validamos explicitamente o valor em ms.
+  if (!(dados.data_hora_inicio instanceof Date) || Number.isNaN(dados.data_hora_inicio.getTime())) {
+    return 'Informe data e hora inicial válidas.';
+  }
+  if (!(dados.data_hora_fim instanceof Date) || Number.isNaN(dados.data_hora_fim.getTime())) {
+    return 'Informe data e hora final válidas.';
+  }
 
   const servico = porId(suporte.servicos, dados.servico_id);
   const cliente = porId(suporte.clientes, dados.cliente_id);
@@ -590,11 +690,4 @@ function porId(lista, id) {
 
 function nomePorId(lista, id) {
   return porId(lista, id)?.nome || `#${id}`;
-}
-
-function criarEstado(texto) {
-  return criarElemento('div', { class: 'loading' }, [
-    criarElemento('span', { class: 'spinner' }),
-    criarElemento('span', { text }),
-  ]);
 }

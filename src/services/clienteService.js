@@ -1,5 +1,10 @@
 import { supabase } from '../lib/supabase.js';
 import { obterProfissionalAutenticado } from './profissionalService.js';
+import { normalizarTelefone, validarTelefoneBrasileiro } from '../lib/validacao.js';
+
+// Re-export das validações de telefone (origem: lib/validacao.js) para manter
+// compatibilidade com importações existentes.
+export { normalizarTelefone, validarTelefoneBrasileiro };
 
 const CAMPOS_CLIENTE = [
   'id',
@@ -37,6 +42,9 @@ export async function listarClientesDaBarbearia() {
 }
 
 export async function criarCliente(dados) {
+  const erroValidacao = validarDadosCliente(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   const { data, error } = await supabase
@@ -44,7 +52,7 @@ export async function criarCliente(dados) {
     .insert({
       barbearia_id: barbeariaId,
       nome: normalizarTexto(dados.nome, true),
-      telefone: normalizarTextoOpcional(dados.telefone),
+      telefone: normalizarTexto(dados.telefone, true),
       email: normalizarTextoOpcional(dados.email),
       observacoes: normalizarTextoOpcional(dados.observacoes),
       ativo: Boolean(dados.ativo),
@@ -57,13 +65,16 @@ export async function criarCliente(dados) {
 }
 
 export async function atualizarCliente(id, dados) {
+  const erroValidacao = validarDadosCliente(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   const { data, error } = await supabase
     .from('clientes')
     .update({
       nome: normalizarTexto(dados.nome, true),
-      telefone: normalizarTextoOpcional(dados.telefone),
+      telefone: normalizarTexto(dados.telefone, true),
       email: normalizarTextoOpcional(dados.email),
       observacoes: normalizarTextoOpcional(dados.observacoes),
       ativo: Boolean(dados.ativo),
@@ -90,6 +101,24 @@ export async function alterarAtivoCliente(id, ativo) {
 
   if (error) throw error;
   return data;
+}
+
+// Validação de negócio única para cadastro e edição de cliente.
+// Rejeita nome/telefone vazios, telefone brasileiro inválido e e-mail malformado.
+function validarDadosCliente(dados) {
+  if (!normalizarTexto(dados.nome, false)) return 'O nome do cliente é obrigatório.';
+
+  const erroTelefone = validarTelefoneBrasileiro(dados.telefone);
+  if (erroTelefone) return erroTelefone;
+
+  if (dados.email) {
+    const email = normalizarTexto(dados.email, false);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return 'Informe um e-mail válido.';
+    }
+  }
+
+  return null;
 }
 
 export function mensagemErroCliente(erro) {

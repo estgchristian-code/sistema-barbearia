@@ -63,6 +63,9 @@ export async function garantirDiasDaBarbearia() {
 
 // Atualiza um dia. Só a própria barbearia é alcançada (RLS horarios_write_admin).
 export async function atualizarHorario(dia) {
+  const erroValidacao = validarHorario(dia);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const { supabase, barbeariaId } = await obterBancoEDados();
 
   const { data, error } = await supabase
@@ -79,6 +82,21 @@ export async function atualizarHorario(dia) {
 
   if (error) throw error;
   return data;
+}
+
+// Validação de negócio (defesa em profundidade). Quando o dia está aberto
+// (não fechado), abertura e fechamento são obrigatórios e o fechamento deve
+// ser posterior à abertura. Quando fechado, os horários são ignorados.
+function validarHorario(dia) {
+  const fechado = Boolean(dia.fechado);
+  if (fechado) return null;
+
+  const abertura = String(dia.hora_abertura || '').trim();
+  const fechamento = String(dia.hora_fechamento || '').trim();
+  if (!abertura) return 'Informe a hora de abertura.';
+  if (!fechamento) return 'Informe a hora de fechamento.';
+  if (fechamento <= abertura) return 'O horário de fechamento deve ser posterior ao de abertura.';
+  return null;
 }
 
 export function mensagemErroHorario(erro) {

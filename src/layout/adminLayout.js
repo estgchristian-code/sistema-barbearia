@@ -39,8 +39,12 @@ export function renderizarPainelAdmin(container, contexto, paginas, callbacks = 
   }, [criarElemento('span', { 'aria-hidden': 'true', text: '☰' })]);
 
   // ---- Navegação ----
+  const ehAdmin = profissional?.cargo === 'admin';
+  const itensVisiveis = ehAdmin
+    ? ITENS_NAVEGACAO
+    : ITENS_NAVEGACAO.filter((i) => ['dashboard', 'agenda', 'clientes'].includes(i.chave));
   const navLista = criarElemento('ul', { class: 'admin-nav-lista', role: 'tablist' });
-  for (const item of ITENS_NAVEGACAO) {
+  for (const item of itensVisiveis) {
     const botao = criarElemento('button', {
       type: 'button',
       class: 'admin-nav-item',

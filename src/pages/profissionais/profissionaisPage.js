@@ -5,7 +5,8 @@ import {
   alterarAtivoProfissional,
   mensagemErroProfissional,
 } from '../../services/profissionalService.js';
-import { criarElemento, criarCampoFormulario } from '../../lib/dom.js';
+import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
+import { validarTelefoneBrasileiro } from '../../lib/validacao.js';
 import { abrirModal, criarMensagem, abrirModalConfirmacao } from '../../components/modal.js';
 
 export async function renderizarProfissionais(conteudo, contexto) {
@@ -189,13 +190,6 @@ function criarBadgeAcesso(authUserId) {
   });
 }
 
-function criarEstado(texto) {
-  return criarElemento('div', { class: 'loading' }, [
-    criarElemento('span', { class: 'spinner' }),
-    criarElemento('span', { text }),
-  ]);
-}
-
 // ------------------------- Modal (cadastro/edição) -------------------------
 
 function abrirFormularioModal({ profissional = null, aoSalvar, aoFechar }) {
@@ -281,6 +275,14 @@ function abrirFormularioModal({ profissional = null, aoSalvar, aoFechar }) {
     if (!dados.nome) {
       msgErro.definir('O nome do profissional é obrigatório.');
       return;
+    }
+
+    if (dados.telefone) {
+      const erroTelefone = validarTelefoneBrasileiro(dados.telefone);
+      if (erroTelefone) {
+        msgErro.definir(erroTelefone);
+        return;
+      }
     }
 
     btnSalvar.disabled = true;

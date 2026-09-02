@@ -48,6 +48,9 @@ export async function listarBloqueiosDoDia(data) {
 // barbeiro_id é sempre derivado da lista de profissionais da própria barbearia
 // no frontend; nunca aceitamos barbearia_id vindo de campo do usuário.
 export async function criarBloqueio(dados) {
+  const erroValidacao = validarDadosBloqueio(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   const { data, error } = await supabase
@@ -67,6 +70,9 @@ export async function criarBloqueio(dados) {
 }
 
 export async function atualizarBloqueio(id, dados) {
+  const erroValidacao = validarDadosBloqueio(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   const { data, error } = await supabase
@@ -96,6 +102,24 @@ export async function excluirBloqueio(id) {
     .eq('barbearia_id', barbeariaId);
 
   if (error) throw error;
+}
+
+// Validação de negócio (defesa em profundidade): início e fim devem ser datas
+// válidas e o fim deve ser posterior ao início. A regra de "início futuro" é
+// tratada na interface (novo bloqueio) e não entra aqui para não impedir
+// edições de registros históricos.
+function validarDadosBloqueio(dados) {
+  const inicio = dados.inicio;
+  const fim = dados.fim;
+
+  if (!(inicio instanceof Date) || Number.isNaN(inicio.getTime())) {
+    return 'Informe a data e a hora de início.';
+  }
+  if (!(fim instanceof Date) || Number.isNaN(fim.getTime())) {
+    return 'Informe a data e a hora de fim.';
+  }
+  if (fim <= inicio) return 'O horário de fim deve ser posterior ao horário de início.';
+  return null;
 }
 
 export function mensagemErroBloqueio(erro) {

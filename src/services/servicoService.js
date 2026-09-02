@@ -40,6 +40,9 @@ export async function listarServicosDaBarbearia() {
 }
 
 export async function criarServico(dados) {
+  const erroValidacao = validarDadosServico(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   // barbearia_id é derivado no servidor (via profissional autenticado),
@@ -62,6 +65,9 @@ export async function criarServico(dados) {
 }
 
 export async function atualizarServico(id, dados) {
+  const erroValidacao = validarDadosServico(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   const { data, error } = await supabase
@@ -118,6 +124,30 @@ export function mensagemErroServico(erro) {
   }
 
   return erro?.message || 'Não foi possível concluir a operação.';
+}
+
+// Validação de negócio única para cadastro e edição de serviço. Rejeita nome
+// vazio/longo demais, preço não numérico ou negativo e duração não inteira
+// positiva. Serve de defesa em profundidade; o banco continua autoridade final.
+function validarDadosServico(dados) {
+  const nome = normalizarTexto(dados.nome);
+  if (!nome) return 'O nome do serviço é obrigatório.';
+  if (nome.length > 200) return 'O nome do serviço deve ter no máximo 200 caracteres.';
+
+  const preco = Number(String(dados.preco).trim());
+  if (String(dados.preco).trim() === '' || Number.isNaN(preco) || !Number.isFinite(preco)) {
+    return 'Informe um preço válido.';
+  }
+  if (preco < 0) return 'O preço não pode ser negativo.';
+
+  const duracao = Number(dados.duracao_minutos);
+  if (String(dados.duracao_minutos).trim() === '' || Number.isNaN(duracao)) {
+    return 'Informe a duração em minutos.';
+  }
+  if (duracao <= 0) return 'A duração deve ser maior que zero.';
+  if (!Number.isInteger(duracao)) return 'A duração deve ser um número inteiro.';
+
+  return null;
 }
 
 function normalizarTexto(texto) {

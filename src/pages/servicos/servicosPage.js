@@ -5,7 +5,7 @@ import {
   alterarAtivoServico,
   mensagemErroServico,
 } from '../../services/servicoService.js';
-import { criarElemento, textoClaro, criarCampoFormulario } from '../../lib/dom.js';
+import { criarElemento, textoClaro, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
 import { abrirModal, criarMensagem } from '../../components/modal.js';
 import { toastSucesso, toastErro } from '../../components/toast.js';
 
@@ -174,13 +174,6 @@ function criarBadgeStatus(ativo) {
   });
 }
 
-function criarEstado(texto) {
-  return criarElemento('div', { class: 'loading' }, [
-    criarElemento('span', { class: 'spinner' }),
-    criarElemento('span', { text }),
-  ]);
-}
-
 function toastNegar(mensagem) {
   criarElemento; // (placeholder — toast de erro importado abaixo)
 }
@@ -312,6 +305,7 @@ function abrirFormularioModal({ servico = null, aposSalvar }) {
 
 function validarDados(dados) {
   if (!dados.nome) return 'O nome do serviço é obrigatório.';
+  if (dados.nome.length > 200) return 'O nome do serviço deve ter no máximo 200 caracteres.';
 
   const preco = Number(String(dados.preco).replace(' ', ''));
   if (dados.preco === '' || Number.isNaN(preco)) return 'Informe um preço válido.';

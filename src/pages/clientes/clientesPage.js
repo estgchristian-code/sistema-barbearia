@@ -4,8 +4,9 @@ import {
   atualizarCliente,
   alterarAtivoCliente,
   mensagemErroCliente,
+  validarTelefoneBrasileiro,
 } from '../../services/clienteService.js';
-import { criarElemento, criarCampoFormulario } from '../../lib/dom.js';
+import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
 import { abrirModal, criarMensagem } from '../../components/modal.js';
 import { toastSucesso } from '../../components/toast.js';
 
@@ -198,13 +199,6 @@ function criarBadgeStatus(ativo) {
   });
 }
 
-function criarEstado(texto) {
-  return criarElemento('div', { class: 'loading' }, [
-    criarElemento('span', { class: 'spinner' }),
-    criarElemento('span', { text }),
-  ]);
-}
-
 // ------------------------- Formulário (cadastro/edição) em modal -------------------------
 
 function abrirFormularioModal({ cliente = null, aposSalvar }) {
@@ -224,6 +218,7 @@ function abrirFormularioModal({ cliente = null, aposSalvar }) {
     name: 'telefone',
     class: 'input',
     value: cliente?.telefone || '',
+    required: true,
     maxlength: 30,
     placeholder: '(41) 99999-9999',
   });
@@ -244,7 +239,7 @@ function abrirFormularioModal({ cliente = null, aposSalvar }) {
   const form = criarElemento('form', { id: 'form-cliente' }, [
     criarCampoFormulario('Nome *', inputNome),
     criarElemento('div', { class: 'form-grid' }, [
-      criarCampoFormulario('Telefone', inputTelefone),
+      criarCampoFormulario('Telefone *', inputTelefone),
       criarCampoFormulario('E-mail', inputEmail),
     ]),
     criarCampoFormulario('Observações', areaObservacoes),
@@ -319,6 +314,9 @@ function abrirFormularioModal({ cliente = null, aposSalvar }) {
 
 function validarDados(dados) {
   if (!dados.nome) return 'O nome do cliente é obrigatório.';
+
+  const erroTelefone = validarTelefoneBrasileiro(dados.telefone);
+  if (erroTelefone) return erroTelefone;
 
   if (dados.email) {
     const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

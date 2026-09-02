@@ -1,6 +1,14 @@
 import { loginComEmailSenha } from '../../services/authService.js';
 import { criarElemento, textoClaro } from '../../lib/dom.js';
 
+// Valida os campos do formulário de login antes de chamar o serviço.
+function validarCampos(email, senha) {
+  if (!email) return 'Informe o e-mail.';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Informe um e-mail válido.';
+  if (!senha) return 'Informe a senha.';
+  return null;
+}
+
 function montarErroAmigavel(erro) {
   const codigoErro = erro?.code || erro?.status;
   const mensagem = textoClaro(erro?.message);
@@ -85,6 +93,15 @@ export function renderizarLogin(container, callbacks = {}) {
     btnEntrar.textContent = 'Entrando…';
     const email = form.email.value.trim();
     const senha = form.senha.value;
+
+    const erroValidacao = validarCampos(email, senha);
+    if (erroValidacao) {
+      msgErro.textContent = erroValidacao;
+      btnEntrar.disabled = false;
+      btnEntrar.textContent = 'Entrar';
+      return;
+    }
+
     try {
       await loginComEmailSenha(email, senha);
       await onAutenticado();

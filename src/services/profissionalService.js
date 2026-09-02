@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { obterUsuarioAutenticado } from './authService.js';
+import { validarTelefoneBrasileiro } from '../lib/validacao.js';
 
 const CAMPOS_PERFIL = 'id, auth_user_id, barbearia_id, nome, telefone, cargo, ativo';
 
@@ -50,6 +51,9 @@ async function obterBarbeariaDoProfissional(requerAdmin = true) {
 // auth_user_id fica NULL: o futuro vínculo com Supabase Auth será tratado
 // em etapa específica. Nenhum usuário Auth é criado aqui.
 export async function criarProfissional(dados) {
+  const erroValidacao = validarDadosProfissional(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   const { data, error } = await supabase
@@ -72,6 +76,9 @@ export async function criarProfissional(dados) {
 // Atualiza nome/telefone/ativo. Nunca altera id, barbearia_id, auth_user_id
 // nem cargo — o cargo (admin) não pode ser alterado via interface nesta etapa.
 export async function atualizarProfissional(id, dados) {
+  const erroValidacao = validarDadosProfissional(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
   const barbeariaId = await obterBarbeariaDoProfissional();
 
   const { data, error } = await supabase
@@ -118,6 +125,22 @@ export function mensagemErroProfissional(erro) {
   }
 
   return erro?.message || 'Não foi possível concluir a operação.';
+}
+
+// Validação de negócio única para cadastro e edição de profissional. Nome é
+// obrigatório; telefone é opcional, mas se informado deve ser um telefone
+// brasileiro válido (DDD + número).
+function validarDadosProfissional(dados) {
+  const nome = normalizarTexto(dados.nome);
+  if (!nome) return 'O nome do profissional é obrigatório.';
+
+  const telefone = normalizarTexto(dados.telefone);
+  if (telefone) {
+    const erroTelefone = validarTelefoneBrasileiro(dados.telefone);
+    if (erroTelefone) return erroTelefone;
+  }
+
+  return null;
 }
 
 function normalizarTexto(texto, obrigatorio = false) {

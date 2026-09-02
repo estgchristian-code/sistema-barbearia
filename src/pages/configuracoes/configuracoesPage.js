@@ -12,7 +12,7 @@ import {
   mensagemErroBloqueio,
 } from '../../services/bloqueioService.js';
 import { listarProfissionaisDaBarbearia } from '../../services/profissionalService.js';
-import { criarElemento, criarCampoFormulario } from '../../lib/dom.js';
+import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
 import { abrirModal, criarMensagem, abrirModalConfirmacao } from '../../components/modal.js';
 
 export async function renderizarConfiguracoes(conteudo, contexto) {
@@ -39,8 +39,15 @@ export async function renderizarConfiguracoes(conteudo, contexto) {
   const secaoBloqueios = criarElemento('section', { class: 'config-secao' });
   conteudo.append(secaoHorarios, secaoBloqueios);
 
-  // Abas ligadas antes de qualquer await: continuam responsivas mesmo que o
-  // carregamento de alguma seção demore ou falhe.
+  // Horários e Bloqueios carregam de forma independente: uma seção nunca
+  // bloqueia a renderização da outra.
+  await Promise.all([
+    renderizarHorarios(secaoHorarios, { ehAdmin }),
+    renderizarBloqueios(secaoBloqueios, { ehAdmin }),
+  ]);
+
+  // Abas ligadas APÓS o render: os botões .config-aba só existem depois que
+  // renderizarHorarios os cria. Ligá-los antes resultava em nenhum listener.
   conteudo.querySelectorAll('.config-aba').forEach((aba) => {
     aba.addEventListener('click', () => {
       const alvo = aba.dataset.alvo;
@@ -49,13 +56,6 @@ export async function renderizarConfiguracoes(conteudo, contexto) {
       conteudo.querySelectorAll('.config-aba').forEach((a) => a.classList.toggle('ativo', a === aba));
     });
   });
-
-  // Horários e Bloqueios carregam de forma independente: uma seção nunca
-  // bloqueia a renderização da outra.
-  await Promise.all([
-    renderizarHorarios(secaoHorarios, { ehAdmin }),
-    renderizarBloqueios(secaoBloqueios, { ehAdmin }),
-  ]);
 }
 
 // ------------------------- HORÁRIOS DE FUNCIONAMENTO -------------------------
@@ -544,9 +544,3 @@ function formatarHoraInput(data) {
   return `${hora}:${min}`;
 }
 
-function criarEstado(texto) {
-  return criarElemento('div', { class: 'loading' }, [
-    criarElemento('span', { class: 'spinner' }),
-    criarElemento('span', { text }),
-  ]);
-}

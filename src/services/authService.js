@@ -1,7 +1,14 @@
 import { supabase } from '../lib/supabase.js';
 
 export async function loginComEmailSenha(email, senha) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password: senha });
+  const e = String(email || '').trim();
+  const s = String(senha || '');
+
+  if (!e) throw new Error('Informe o e-mail.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new Error('Informe um e-mail válido.');
+  if (!s) throw new Error('Informe a senha.');
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email: e, password: s });
   if (error) throw error;
   return data;
 }
