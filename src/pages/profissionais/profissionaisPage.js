@@ -3,6 +3,7 @@ import {
   criarProfissional,
   atualizarProfissional,
   alterarAtivoProfissional,
+  criarAcessoProfissional,
   mensagemErroProfissional,
 } from '../../services/profissionalService.js';
 import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
@@ -147,6 +148,17 @@ async function carregarProfissionais(lista, { ehAdmin, idAdminAtual }) {
       });
     });
   });
+  tbody.querySelectorAll('[data-criar-acesso-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = Number(btn.dataset.criarAcessoId);
+      const p = profissionais.find((x) => x.id === id);
+      if (p) {
+        abrirModalCriarAcesso(p, () =>
+          carregarProfissionais(lista, { ehAdmin, idAdminAtual })
+        );
+      }
+    });
+  });
 }
 
 function montarAcoes(p, { ehAdmin, ehAdminLinha, protegido }) {
@@ -155,25 +167,36 @@ function montarAcoes(p, { ehAdmin, ehAdminLinha, protegido }) {
     return [criarElemento('span', { text: 'Protegido' })];
   }
 
-  const editar = criarElemento('button', {
+  const botoes = [];
+
+  if (!p.auth_user_id) {
+    botoes.push(criarElemento('button', {
+      type: 'button',
+      class: 'btn btn-accent btn-sm',
+      'data-criar-acesso-id': String(p.id),
+      text: 'Criar acesso',
+    }));
+  }
+
+  botoes.push(criarElemento('button', {
     type: 'button',
     class: 'btn btn-secondary btn-sm',
     'data-edit-id': String(p.id),
     text: 'Editar',
-  });
+  }));
 
   // Admin não pode ser desativado (impede deixar a barbearia sem admin).
-  if (ehAdminLinha) return [editar];
+  if (!ehAdminLinha) {
+    botoes.push(criarElemento('button', {
+      type: 'button',
+      class: 'btn btn-ghost btn-sm',
+      'data-toggle-id': String(p.id),
+      'data-ativo': p.ativo ? 'true' : 'false',
+      text: p.ativo ? 'Desativar' : 'Ativar',
+    }));
+  }
 
-  const desativar = criarElemento('button', {
-    type: 'button',
-    class: 'btn btn-ghost btn-sm',
-    'data-toggle-id': String(p.id),
-    'data-ativo': p.ativo ? 'true' : 'false',
-    text: p.ativo ? 'Desativar' : 'Ativar',
-  });
-
-  return [editar, desativar];
+  return botoes;
 }
 
 function criarBadgeAtivo(ativo) {
@@ -299,6 +322,83 @@ function abrirFormularioModal({ profissional = null, aoSalvar, aoFechar }) {
 
   btnCancelar.addEventListener('click', modal.fechar);
   btnSalvar.addEventListener('click', salvar);
+  form.addEventListener('submit', (evento) => {
+    evento.preventDefault();
+    salvar();
+  });
+}
+
+// ------------------------- Modal (criar acesso) -------------------------
+
+function abrirModalCriarAcesso(profissional, aoFechar) {
+  const msgErro = criarMensagem('danger');
+
+  const inputEmail = criarElemento('input', {
+    type: 'email',
+    name: 'email',
+    class: 'input',
+    placeholder: 'email@exemplo.com',
+    required: true,
+  });
+  const inputSenha = criarElemento('input', {
+    type: 'password',
+    name: 'senha',
+    class: 'input',
+    placeholder: 'Mínimo 8 caracteres',
+    required: true,
+  });
+
+  const form = criarElemento('form', { id: 'form-criar-acesso' }, [
+    criarCampoFormulario('E-mail de login *', inputEmail),
+    criarCampoFormulario('Senha inicial *', inputSenha),
+    criarElemento('p', { class: 'alert alert-info', text: 'O profissional usará este e-mail e senha para fazer login no sistema.' }),
+    msgErro,
+  ]);
+
+  const btnCancelar = criarElemento('button', { type: 'button', class: 'btn btn-secondary', text: 'Cancelar' });
+  const btnConfirmar = criarElemento('button', {
+    type: 'button',
+    class: 'btn btn-primary',
+    text: 'Criar acesso',
+  });
+
+  const modal = abrirModal({
+    titulo: `Criar acesso — ${profissional.nome}`,
+    tamanho: 'md',
+    corpo: [form],
+    rodape: [btnCancelar, btnConfirmar],
+    aoFechar,
+  });
+
+  async function salvar() {
+    msgErro.limpar();
+
+    const email = inputEmail.value.trim();
+    const senha = inputSenha.value;
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      msgErro.definir('Informe um e-mail válido.');
+      return;
+    }
+    if (!senha || senha.length < 8) {
+      msgErro.definir('A senha deve ter pelo menos 8 caracteres.');
+      return;
+    }
+
+    btnConfirmar.disabled = true;
+    btnConfirmar.textContent = 'Criando acesso…';
+    try {
+      await criarAcessoProfissional(profissional.id, email, senha);
+      modal.fechar();
+    } catch (erro) {
+      msgErro.definir(erro?.message || 'Não foi possível criar o acesso.');
+      btnConfirmar.disabled = false;
+      btnConfirmar.textContent = 'Criar acesso';
+    }
+  }
+
+  btnCancelar.addEventListener('click', modal.fechar);
+  btnConfirmar.addEventListener('click', salvar);
   form.addEventListener('submit', (evento) => {
     evento.preventDefault();
     salvar();

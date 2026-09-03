@@ -113,6 +113,48 @@ export async function alterarAtivoProfissional(id, ativo) {
   return data;
 }
 
+// ---------------------------------------------------------------------------
+// Criar acesso de login (Supabase Auth) para um profissional.
+// Chama a Edge Function criar-acesso-profissional (server-side).
+// ---------------------------------------------------------------------------
+export async function criarAcessoProfissional(profissionalId, email, senha) {
+  const barbeariaId = await obterBarbeariaDoProfissional();
+
+  const { data: sessao, error: sessaoErro } = await supabase.auth.getSession();
+  if (sessaoErro || !sessao?.session?.access_token) {
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const url = `${supabaseUrl}/functions/v1/criar-acesso-profissional`;
+
+  const resposta = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${sessao.session.access_token}`,
+    },
+    body: JSON.stringify({
+      profissional_id: profissionalId,
+      email,
+      senha,
+    }),
+  });
+
+  let json;
+  try {
+    json = await resposta.json();
+  } catch {
+    throw new Error('Resposta inválida do servidor.');
+  }
+
+  if (!resposta.ok || json?.ok === false) {
+    throw new Error(json?.message || 'Não foi possível criar o acesso.');
+  }
+
+  return json.data;
+}
+
 export function mensagemErroProfissional(erro) {
   const mensagem = (erro?.message || '').toLowerCase();
 

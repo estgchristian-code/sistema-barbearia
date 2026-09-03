@@ -49,3 +49,19 @@ policy = "per_worker"
 # ===========================================================================
 [functions.criar-agendamento]
 verify_jwt = false
+
+# ===========================================================================
+# Edge Function "criar-acesso-profissional"
+#
+# Rota autenticada — verify_jwt = true (padrão).
+# Cria um usuário Supabase Auth e vincula ao profissional.
+# Somente admin da barbearia pode executar.
+#
+# Deploy:
+#   supabase functions deploy criar-acesso-profissional
+#
+# Secrets necessários (já compartilhados com criar-agendamento):
+#   PUBLIC_ORIGINS — incluir o domínio do painel admin (ex.: Cloudflare Pages)
+# ===========================================================================
+[functions.criar-acesso-profissional]
+verify_jwt = true
