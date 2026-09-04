@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS public.barbearias (
     telefone    TEXT,
     email       TEXT,
     endereco    TEXT,
+    timezone    TEXT NOT NULL DEFAULT 'America/Sao_Paulo',
     ativo       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),

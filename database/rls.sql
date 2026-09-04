@@ -473,6 +473,142 @@ BEGIN
 END;
 $$;
 
+-- ------------------------------------------------------------------
+-- 9.5 AUTORIDADE DE BLOQUEIOS E HORÁRIO (server-side, elimina corrida)
+-- ------------------------------------------------------------------
+-- Garante, NO BANCO, que um agendamento nunca seja confirmado em intervalo
+-- que viole:
+--   1. bloqueio geral da barbearia (barbeiro_id IS NULL);
+--   2. bloqueio específico do barbeiro;
+--   3. horário de funcionamento (com o fuso local da barbearia).
+--
+-- A validação roda no trigger BEFORE INSERT/UPDATE do próprio agendamento,
+-- portanto cobre TODAS as vias de escrita (Edge Function pública, RPC
+-- admin_criar_agendamento, admin_atualizar_agendamento e qualquer futuro
+-- INSERT/UPDATE) — não depende de validação do frontend.
+--
+-- Para eliminar a corrida "verificar → inserir", usa-se um advisory lock
+-- xact por barbearia, também adquirido por um trigger em bloqueios_agenda.
+-- Assim, criar/editar um bloqueio é mutuamente exclusivo com a validação de
+-- um agendamento concorrente: ou o bloqueio commita antes (e o agendamento é
+-- barrado) ou o agendamento commita antes (e o bloqueio vale dali em diante).
+-- Linhas com status = 'cancelado' são ignoradas (não ocupam horário — mesmo
+-- critério de ux_agendamentos_sem_conflito). RLS/grants NÃO são alterados.
+--
+-- (Migração correspondente para banco já existente:
+--  database/migrations/002_agendamento_bloqueio_validation.sql)
+
+-- Função de validação (SECURITY DEFINER, roda como dono / sem search_path).
+CREATE OR REPLACE FUNCTION public.validar_agendamento_bloqueios()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_tz          text;
+    v_dia         int;
+    v_abertura    time;
+    v_fechamento  time;
+    v_fechado     boolean;
+    v_inicio_min  int;
+    v_fim_min     int;
+    v_ab_min      int;
+    v_fech_min    int;
+    v_ts_inicio   timestamp;
+    v_ts_fim      timestamp;
+BEGIN
+    IF NEW.status = 'cancelado' THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('barbearia_agenda:' || NEW.barbearia_id::text, 0)
+    );
+
+    SELECT b.timezone INTO v_tz
+      FROM public.barbearias b
+     WHERE b.id = NEW.barbearia_id;
+    IF v_tz IS NULL OR v_tz = '' THEN
+        v_tz := 'America/Sao_Paulo';
+    END IF;
+
+    v_dia := extract(dow FROM (NEW.data_hora_inicio AT TIME ZONE v_tz))::int;
+
+    SELECT h.hora_abertura, h.hora_fechamento, h.fechado
+      INTO v_abertura, v_fechamento, v_fechado
+      FROM public.horarios_funcionamento h
+     WHERE h.barbearia_id = NEW.barbearia_id
+       AND h.dia_semana = v_dia;
+
+    IF NOT FOUND OR v_fechado THEN
+        RAISE EXCEPTION 'Barbearia fechada neste dia.' USING ERRCODE = 'P0001';
+    END IF;
+
+    v_ab_min   := extract(hour FROM v_abertura)::int * 60
+                   + extract(minute FROM v_abertura)::int;
+    v_fech_min := extract(hour FROM v_fechamento)::int * 60
+                   + extract(minute FROM v_fechamento)::int;
+
+    v_ts_inicio := NEW.data_hora_inicio AT TIME ZONE v_tz;
+    v_ts_fim    := NEW.data_hora_fim    AT TIME ZONE v_tz;
+
+    v_inicio_min := extract(hour FROM v_ts_inicio)::int * 60
+                     + extract(minute FROM v_ts_inicio)::int;
+    v_fim_min    := extract(hour FROM v_ts_fim)::int * 60
+                     + extract(minute FROM v_ts_fim)::int;
+
+    IF v_inicio_min < v_ab_min OR v_fim_min > v_fech_min THEN
+        RAISE EXCEPTION 'Este horário está fora do funcionamento da barbearia.'
+            USING ERRCODE = 'P0001';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+          FROM public.bloqueios_agenda b
+         WHERE b.barbearia_id = NEW.barbearia_id
+           AND (b.barbeiro_id IS NULL OR b.barbeiro_id = NEW.barbeiro_id)
+           AND b.inicio < NEW.data_hora_fim
+           AND b.fim    > NEW.data_hora_inicio
+    ) THEN
+        RAISE EXCEPTION 'Este horário está bloqueado para este barbeiro.'
+            USING ERRCODE = 'P0001';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_agendamentos_validar_bloqueios ON public.agendamentos;
+CREATE TRIGGER trg_agendamentos_validar_bloqueios
+    BEFORE INSERT OR UPDATE OF
+        barbearia_id, barbeiro_id, data_hora_inicio, data_hora_fim, status
+    ON public.agendamentos
+    FOR EACH ROW EXECUTE FUNCTION public.validar_agendamento_bloqueios();
+
+-- Função de serialização de bloqueios (mesmo advisory lock por barbearia).
+CREATE OR REPLACE FUNCTION public.serializar_bloqueio_barbearia()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('barbearia_agenda:' || NEW.barbearia_id::text, 0)
+    );
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_bloqueios_serializar ON public.bloqueios_agenda;
+CREATE TRIGGER trg_bloqueios_serializar
+    BEFORE INSERT OR UPDATE ON public.bloqueios_agenda
+    FOR EACH ROW EXECUTE FUNCTION public.serializar_bloqueio_barbearia();
+
+REVOKE ALL ON FUNCTION public.validar_agendamento_bloqueios() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.serializar_bloqueio_barbearia() FROM PUBLIC, anon;
+
 -- Grants de execução: somente authenticated (sem acesso para anon/public).
 REVOKE ALL ON FUNCTION public.transicao_status_valida(text, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.admin_atualizar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) FROM PUBLIC, anon;

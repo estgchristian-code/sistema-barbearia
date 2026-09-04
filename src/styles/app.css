@@ -5,27 +5,27 @@
 /* -------------------------------- TOASTS --------------------------------- */
 .toast-pilha {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  right: 20px;
+  bottom: 20px;
   z-index: 1200;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: min(380px, calc(100svw - 32px));
+  gap: 12px;
+  max-width: min(420px, calc(100svw - 40px));
 }
 
 .toast {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  font-size: var(--font-size-sm);
+  gap: 12px;
+  font-size: var(--font-size-md);
   line-height: 1.5;
   color: var(--text-primary);
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-left-width: 4px;
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: 14px 16px;
   box-shadow: var(--shadow-md);
   transform: translateY(8px);
   opacity: 0;
@@ -62,8 +62,8 @@
 .toast-icone {
   flex-shrink: 0;
   font-weight: var(--font-weight-bold);
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -118,22 +118,42 @@
 }
 
 .dashboard-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px;
-  border-top: 3px solid var(--border-strong);
-  transition: border-color var(--transition), transform var(--transition-fast);
+  gap: 12px;
+  padding: 24px;
+  overflow: hidden;
+  transition: transform var(--transition-fast), border-color var(--transition), box-shadow var(--transition);
+}
+
+.dashboard-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--border-strong);
+  transition: background var(--transition);
 }
 
 .dashboard-card:hover {
-  border-top-color: var(--accent);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
 
+.dashboard-card:hover::before {
+  background: var(--accent);
+}
+
 .dashboard-card.destaque {
-  border-top-color: var(--accent);
   background: linear-gradient(160deg, var(--accent-soft), rgba(217, 142, 55, 0.05) 55%, var(--surface));
+}
+
+.dashboard-card.destaque::before {
+  background: var(--accent);
 }
 
 .dashboard-card-topo {
@@ -144,7 +164,7 @@
 }
 
 .dashboard-card-rotulo {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -155,10 +175,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: var(--font-weight-bold);
   border-radius: var(--radius-md);
   color: var(--accent);
@@ -173,7 +193,7 @@
 }
 
 .dashboard-card-valor {
-  font-size: 32px;
+  font-size: 2.375rem;
   font-weight: var(--font-weight-bold);
   color: var(--text-primary);
   line-height: 1.1;
@@ -181,12 +201,12 @@
 }
 
 .dashboard-card-sufixo {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
 }
 
 .dashboard-estado {
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
 .dashboard-obs {
@@ -202,24 +222,24 @@
 .agenda-controles {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .agenda-data-exibida {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   text-transform: capitalize;
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
 .agenda-data-badge-hoje {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -227,7 +247,7 @@
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
   border-radius: var(--radius-pill);
-  padding: 2px 10px;
+  padding: 4px 12px;
 }
 
 .agenda-filtro {
@@ -237,18 +257,18 @@
 /* Cards de agendamento */
 .agenda-card {
   display: grid;
-  grid-template-columns: 110px 1fr auto;
+  grid-template-columns: 120px 1fr auto;
   grid-template-areas:
     'hora corpo status'
     'hora corpo acoes';
-  gap: 4px 16px;
+  gap: 6px 18px;
   align-items: start;
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 4px solid var(--neutral);
   border-radius: var(--radius-lg);
-  padding: 14px 16px;
-  margin-bottom: 10px;
+  padding: 18px 20px;
+  margin-bottom: 12px;
   box-shadow: var(--shadow-sm);
   transition: border-color var(--transition), background var(--transition);
 }
@@ -285,7 +305,7 @@
   grid-area: hora;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
   padding-top: 2px;
@@ -295,22 +315,22 @@
   display: inline-flex;
   flex-direction: column;
   font-weight: var(--font-weight-semibold);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-xl);
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 6px 10px;
+  padding: 8px 14px;
 }
 
 .agenda-card-hora-horario .hora-sep {
   color: var(--text-muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .agenda-card-duracao {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
 
@@ -318,7 +338,7 @@
   grid-area: corpo;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -340,11 +360,11 @@
 .agenda-card-obs {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 6px 10px;
+  padding: 8px 12px;
   overflow-wrap: anywhere;
 }
 
@@ -357,8 +377,8 @@
   grid-area: acoes;
   justify-self: end;
   display: flex;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .agenda-card-rodape {
@@ -374,19 +394,19 @@
 /* Cartão de bloqueio (visual distinto dos agendamentos) */
 .agenda-bloqueio {
   display: grid;
-  grid-template-columns: 92px 1fr;
+  grid-template-columns: 96px 1fr;
   grid-template-areas:
     'hora corpo'
     'hora motivo';
-  gap: 2px 16px;
+  gap: 2px 18px;
   align-items: start;
   background: rgba(22, 26, 33, 0.6);
   border: 1px dashed var(--border-strong);
   border-left-style: solid;
   border-left-width: 4px;
   border-radius: var(--radius-lg);
-  padding: 12px 16px;
-  margin-bottom: 10px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
 }
 
 .agenda-bloqueio.geral {
@@ -401,13 +421,13 @@
   grid-area: hora;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
 .agenda-bloqueio-hora span {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
@@ -422,7 +442,7 @@
   grid-area: corpo;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .agenda-bloqueio-barbeiro {
@@ -437,7 +457,7 @@
 
 .agenda-bloqueio-motivo {
   grid-area: motivo;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
   margin: 0;
 }
@@ -447,12 +467,12 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 12px 14px;
   margin: 0;
   flex-wrap: wrap;
 }
@@ -461,7 +481,7 @@
 .config-abas {
   display: inline-flex;
   gap: 4px;
-  padding: 4px;
+  padding: 5px;
   margin-bottom: 20px;
   max-width: 100%;
   background: var(--surface-2);
@@ -471,8 +491,8 @@
 }
 
 .config-aba {
-  font: var(--font-weight-medium) var(--font-size-sm)/1 var(--font-family);
-  padding: 8px 16px;
+  font: var(--font-weight-medium) var(--font-size-md)/1 var(--font-family);
+  padding: 10px 20px;
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -494,7 +514,7 @@
 }
 
 .config-secao {
-  margin-bottom: 28px;
+  margin-bottom: 32px;
 }
 
 .config-secao.oculto {
@@ -503,7 +523,7 @@
 
 .config-secao-titulo h2 {
   font-size: var(--font-size-xl);
-  margin: 0 0 14px;
+  margin: 0 0 16px;
 }
 
 .bloqueios-cabecalho {
@@ -512,29 +532,29 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 /* Horários */
 .horarios-grade {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .horario-linha {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   flex-wrap: wrap;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 12px 16px;
+  padding: 16px 20px;
 }
 
 .horario-dia {
-  width: 110px;
+  width: 120px;
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
@@ -555,7 +575,7 @@
 }
 
 .horario-campo span {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -567,7 +587,7 @@
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  padding: 10px 12px;
 }
 
 .horario-campo input:disabled {
@@ -595,14 +615,14 @@
 .bloqueio-card {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   flex-wrap: wrap;
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 4px;
   border-radius: var(--radius-md);
-  padding: 14px 16px;
-  margin-bottom: 10px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
   box-shadow: var(--shadow-sm);
 }
 
@@ -623,7 +643,7 @@
 }
 
 .bloqueio-card-periodo span {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   font-weight: var(--font-weight-normal);
 }
@@ -635,7 +655,7 @@
 }
 
 .bloqueio-card-motivo {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
   margin: 0;
 }
@@ -643,7 +663,7 @@
 .bloqueio-card-acoes {
   margin-left: auto;
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* --------------------------- TABELA RESPONSIVA (CARD) -------------------- */

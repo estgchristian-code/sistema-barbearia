@@ -262,6 +262,20 @@ Deno.serve(async (req: Request) => {
       return erro(Number(codigo) || 422, texto || "Solicitação inválida.", headers);
     }
 
+    // Validações lançadas pelo banco (trigger trg_agendamentos_validar_bloqueios),
+    // que é a autoridade final e o backstop para o caso concorrente (corrida
+    // entre a pré-validação da função e o commit do agendamento). Devolvem uma
+    // resposta amigável em vez de 500.
+    if (msg.includes("bloqueado para este barbeiro")) {
+      return erro(409, "Este horário está bloqueado para este barbeiro.", headers);
+    }
+    if (
+      msg.includes("fora do funcionamento") ||
+      msg.includes("fechada neste dia")
+    ) {
+      return erro(422, msg.trim(), headers);
+    }
+
     console.error("[criar-agendamento] erro interno", e);
     // Nunca expor stack trace nem detalhes do banco ao cliente.
     return erro(500, "Erro interno ao processar o agendamento.", headers);
