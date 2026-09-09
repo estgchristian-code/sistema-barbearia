@@ -586,6 +586,64 @@ CREATE TRIGGER trg_agendamentos_validar_bloqueios
     ON public.agendamentos
     FOR EACH ROW EXECUTE FUNCTION public.validar_agendamento_bloqueios();
 
+-- =====================================================================
+-- 9.6 AUTORIDADE DE DURAÇÃO — data_hora_fim DERIVADO do serviço
+-- =====================================================================
+-- Garante, NO BANCO, que a duração de um agendamento seja SEMPRE:
+--
+--     data_hora_fim = data_hora_inicio + servicos.duracao_minutos
+--
+-- O trigger é BEFORE e dispara em:
+--   * INSERT;
+--   * UPDATE OF servico_id, data_hora_inicio, data_hora_fim
+--     (incluir data_hora_fim no UPDATE OF é OBRIGATÓRIO para impedir que
+--      alguém altere SOMENTE o fim e escape da derivação).
+--
+-- Por ser alfabeticamente anterior a trg_agendamentos_validar_bloqueios
+-- (derivar_... < validar_...), roda ANTES dele, garantindo que a validação
+-- de bloqueios/horário de funcionamento sempre enxergue o FIM DERIVADO.
+--
+-- Cobre TODAS as vias de escrita em agendamentos:
+--   * Edge Function pública (criar-agendamento, via service-role);
+--   * RPC administrativa admin_criar_agendamento / admin_atualizar_agendamento;
+--   * qualquer INSERT/UPDATE futuro.
+--
+-- NÃO altera RLS, nem grants e NÃO abre nenhuma permissão nova.
+CREATE OR REPLACE FUNCTION public.derivar_duracao_agendamento()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_duracao integer;
+BEGIN
+    -- 1) Localiza o serviço pela combinação (servico_id, barbearia_id).
+    -- 2) A duração vem DIRETO do banco — nunca do cliente.
+    SELECT s.duracao_minutos
+      INTO v_duracao
+      FROM public.servicos s
+     WHERE s.id = NEW.servico_id
+       AND s.barbearia_id = NEW.barbearia_id;
+
+    IF v_duracao IS NULL THEN
+        RAISE EXCEPTION 'serviço inválido para o agendamento'
+            USING ERRCODE = 'P0001';
+    END IF;
+
+    -- 3) Substitui o fim pelo valor calculado (qualquer fim enviado é ignorado).
+    NEW.data_hora_fim := NEW.data_hora_inicio + make_interval(mins => v_duracao);
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_agendamentos_derivar_duracao ON public.agendamentos;
+CREATE TRIGGER trg_agendamentos_derivar_duracao
+    BEFORE INSERT OR UPDATE OF
+        servico_id, data_hora_inicio, data_hora_fim
+    ON public.agendamentos
+    FOR EACH ROW EXECUTE FUNCTION public.derivar_duracao_agendamento();
+
 -- Função de serialização de bloqueios (mesmo advisory lock por barbearia).
 CREATE OR REPLACE FUNCTION public.serializar_bloqueio_barbearia()
 RETURNS trigger
@@ -608,6 +666,7 @@ CREATE TRIGGER trg_bloqueios_serializar
 
 REVOKE ALL ON FUNCTION public.validar_agendamento_bloqueios() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.serializar_bloqueio_barbearia() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.derivar_duracao_agendamento() FROM PUBLIC, anon;
 
 -- Grants de execução: somente authenticated (sem acesso para anon/public).
 REVOKE ALL ON FUNCTION public.transicao_status_valida(text, text) FROM PUBLIC, anon;
