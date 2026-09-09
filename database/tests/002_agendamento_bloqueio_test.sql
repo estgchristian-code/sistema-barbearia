@@ -5,11 +5,13 @@
 --   database/migrations/002_agendamento_bloqueio_validation.sql
 --
 -- Este script é AUTOCONTIDO e SEGURO:
---   * roda dentro de uma única transação (DO block);
+--   * usa UMA TRANSAÇÃO EXPLÍCITA (BEGIN ... ROLLBACK), sem depender do
+--     autocommit nem do ROLLBACK implícito de DO block;
 --   * cria uma barbearia/horário/serviço/barbeiro/cliente TÉCNICOS;
---   * valida os cenários abaixo e ROLLBACK de tudo ao final (nada persiste);
+--   * valida os cenários abaixo e executa ROLLBACK ao final (nada persiste);
 --   * se todas as asserções passarem, imprime 'SUCESSO: NN/NN';
---   * se alguma falhar, lança exceção (e a transação é revertida).
+--   * se alguma falhar, lança exceção (e a transação é revertida pelo ROLLBACK);
+--   * o banco fica limpo após QUALQUER execução (sucesso ou falha).
 --
 -- Cenários cobertos:
 --   1. agendamento VÁLIDO (dentro do horário, sem bloqueio) -> aceito;
@@ -25,9 +27,11 @@
 --   entre o trigger de agendamentos e o de bloqueios_agenda. Isso torna a
 --   criação/edição de bloqueio mutuamente exclusiva com a validação de um
 --   agendamento concorrente. Um teste 100% concorrente exige DOIS clientes
---   SQL simultâneos (o DO block é de uma única transação) — ver a seção
---   "TESTE CONCORRENTE (manual)" ao final.
+--   SQL simultâneos (o roteiro roda dentro de uma única transação
+--   BEGIN ... ROLLBACK) — ver a seção "TESTE CONCORRENTE (manual)" ao final.
 -- ===========================================================================
+
+BEGIN;
 
 DO $$
 DECLARE
@@ -43,8 +47,8 @@ BEGIN
     -- ------------------------------------------------------------------
     -- SETUP (dados técnicos, apenas para o teste)
     -- ------------------------------------------------------------------
-    INSERT INTO public.barbearias (nome, telefone, timezone)
-    VALUES ('Barbearia Teste Mig002', '(41) 99999-0000', 'America/Sao_Paulo')
+    INSERT INTO public.barbearias (nome, telefone, slug, timezone)
+    VALUES ('Barbearia Teste Mig002', '(41) 99999-0000', 'barbearia-teste-mig002', 'America/Sao_Paulo')
     RETURNING id INTO v_bar;
 
     -- Segunda a sábado (1..6) abertos 08:00-18:00; domingo (0) fechado.
@@ -224,8 +228,10 @@ BEGIN
         RAISE EXCEPTION 'FALHA: apenas %/% asserções passaram', c_ok, c_total;
     END IF;
 
-    RAISE NOTICE 'SUCESSO: %/% asserções passaram (transação revertida, nada persistiu)', c_ok, c_total;
+    RAISE NOTICE 'SUCESSO: %/% asserções passaram (ROLLBACK será executado em seguida; nada será persistido)', c_ok, c_total;
 END $$;
+
+ROLLBACK;
 
 
 -- ===========================================================================
