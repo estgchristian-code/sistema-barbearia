@@ -2,7 +2,7 @@ import { supabase } from '../lib/supabase.js';
 import { obterUsuarioAutenticado } from './authService.js';
 import { validarTelefoneBrasileiro } from '../lib/validacao.js';
 
-const CAMPOS_PERFIL = 'id, auth_user_id, barbearia_id, nome, telefone, cargo, ativo';
+const CAMPOS_PERFIL = 'id, auth_user_id, barbearia_id, nome, telefone, cargo, ativo, deleted_at';
 
 export async function obterProfissionalAutenticado() {
   const usuario = await obterUsuarioAutenticado();
@@ -12,13 +12,15 @@ export async function obterProfissionalAutenticado() {
     .from('profissionais')
     .select(CAMPOS_PERFIL)
     .eq('auth_user_id', usuario.id)
+    .is('deleted_at', null)
     .maybeSingle();
 
   if (error) throw error;
   return data;
 }
 
-// Lista os profissionais da própria barbearia (RLS profissionais_select_propria).
+// Lista os profissionais VIGENTES da própria barbearia
+// (RLS profissionais_select_propria). Excluídos (deleted_at) ficam de fora.
 export async function listarProfissionaisDaBarbearia() {
   const profissional = await obterProfissionalAutenticado();
   if (!profissional) return [];
@@ -27,6 +29,25 @@ export async function listarProfissionaisDaBarbearia() {
   const { data, error } = await supabase
     .from('profissionais')
     .select(CAMPOS_PERFIL)
+    .eq('barbearia_id', profissional.barbearia_id)
+    .is('deleted_at', null)
+    .order('nome', { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+// Todos os profissionais da própria barbearia, INCLUINDO excluídos
+// (soft delete). Usado SOMENTE para resolver nomes no histórico de
+// agendamentos e bloqueios — nunca em seletores de novos registros.
+export async function listarProfissionaisIncluindoExcluidos() {
+  const profissional = await obterProfissionalAutenticado();
+  if (!profissional) return [];
+  if (!profissional.ativo) throw new Error('Este profissional está inativo.');
+
+  const { data, error } = await supabase
+    .from('profissionais')
+    .select('id, nome, cargo, ativo, deleted_at')
     .eq('barbearia_id', profissional.barbearia_id)
     .order('nome', { ascending: true });
 
@@ -114,6 +135,71 @@ export async function alterarAtivoProfissional(id, ativo) {
 }
 
 // ---------------------------------------------------------------------------
+// Exclusão (soft delete) de um profissional. Server-side e somente Admin:
+//   1. RPC admin_excluir_profissional marca deleted_at = now() e ativo =
+//      false (o banco valida admin da mesma barbearia, não deixa excluir o
+//      próprio cadastro nem o único admin ativo). NUNCA exclui a linha.
+//   2. Se o profissional tinha acesso (auth_user_id), chama a Edge Function
+//      remover-acesso-profissional para remover o usuário do Supabase Auth.
+//      Se essa remoção falhar, o profissional JÁ está excluído e inoperante
+//      (RLS exige deleted_at IS NULL), mas o aviso é propagado para retry.
+// ---------------------------------------------------------------------------
+export async function excluirProfissional(id, temAcesso) {
+  const { error } = await supabase.rpc('admin_excluir_profissional', {
+    p_profissional_id: id,
+  });
+  if (error) throw error;
+
+  if (temAcesso) {
+    const aviso = await removerAcessoProfissional(id);
+    if (aviso) {
+      throw new Error(
+        'O profissional foi excluído, mas o acesso ao sistema não pôde ser removido automaticamente. Tente novamente ou remova manualmente no Supabase.'
+      );
+    }
+  }
+}
+
+// Remove o usuário Auth de um profissional excluído. Retorna null em caso de
+// sucesso ou uma mensagem de erro amigável (a exclusão já foi efetivada).
+async function removerAcessoProfissional(profissionalId) {
+  const { data: sessao, error: sessaoErro } = await supabase.auth.getSession();
+  if (sessaoErro || !sessao?.session?.access_token) {
+    return 'Sessão expirada.';
+  }
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const url = `${supabaseUrl}/functions/v1/remover-acesso-profissional`;
+
+  let resposta;
+  try {
+    resposta = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessao.session.access_token}`,
+      },
+      body: JSON.stringify({ profissional_id: profissionalId }),
+    });
+  } catch {
+    return 'Não foi possível contactar o servidor.';
+  }
+
+  let json;
+  try {
+    json = await resposta.json();
+  } catch {
+    return 'Resposta inválida do servidor.';
+  }
+
+  if (!resposta.ok || json?.ok === false) {
+    return json?.message || 'Não foi possível remover o acesso.';
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Criar acesso de login (Supabase Auth) para um profissional.
 // Chama a Edge Function criar-acesso-profissional (server-side).
 // ---------------------------------------------------------------------------
@@ -157,6 +243,22 @@ export async function criarAcessoProfissional(profissionalId, email, senha) {
 
 export function mensagemErroProfissional(erro) {
   const mensagem = (erro?.message || '').toLowerCase();
+
+  if (mensagem.includes('excluir o próprio cadastro')) {
+    return 'Você não pode excluir o próprio cadastro.';
+  }
+
+  if (mensagem.includes('único administrador')) {
+    return 'Não é possível excluir o único administrador da barbearia.';
+  }
+
+  if (mensagem.includes('já foi excluído')) {
+    return 'Este profissional já foi excluído.';
+  }
+
+  if (mensagem.includes('profissional não encontrado')) {
+    return 'Profissional não encontrado ou já excluído.';
+  }
 
   if (erro?.code === '42501' || mensagem.includes('permission denied') || mensagem.includes('row-level security')) {
     return 'Sem permissão para realizar esta operação. Verifique se você é um administrador ativo desta barbearia.';

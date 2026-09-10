@@ -50,8 +50,10 @@ export async function listarAgendamentosDoDia(data) {
   return listarAgendamentosPorPeriodo(inicio.toISOString(), fim.toISOString());
 }
 
-// Dados de suporte dos formulários: clientes, serviços e profissionais ATIVOS
-// da própria barbearia. Nenhuma lista fixa em JavaScript.
+// Dados de suporte dos formulários: clientes, serviços e profissionais da
+// própria barbearia (inclui excluídos — usado só para resolver nomes no
+// histórico; os seletores do frontend filtram !deleted_at && ativo).
+// Nenhuma lista fixa em JavaScript.
 // A lista de clientes difere por cargo:
 //   * admin  -> SELECT direto em clientes (clientes_select_propria mostra todos);
 //   * barbeiro -> RPC listar_clientes_para_agendamento(): devolve SOMENTE
@@ -78,7 +80,7 @@ export async function obterDadosSuporteAgenda() {
       .order('nome', { ascending: true }),
     supabase
       .from('profissionais')
-      .select('id, nome, cargo, ativo')
+      .select('id, nome, cargo, ativo, deleted_at')
       .eq('barbearia_id', barbeariaId)
       .order('nome', { ascending: true }),
   ]);
@@ -236,6 +238,10 @@ export function mensagemErroAgendamento(erro) {  const msg = (erro?.message || '
 
   if (msg.includes('cliente inválido')) {
     return 'Cliente inválido. Verifique se é ativo e pertence a esta barbearia.';
+  }
+
+  if (msg.includes('barbeiro inválido ou indisponível')) {
+    return 'O barbeiro selecionado é inválido, está inativo ou foi excluído.';
   }
 
   if (msg.includes('serviço inválido')) {

@@ -88,8 +88,9 @@ export async function renderizarAgenda(conteudo, contexto) {
 
   const filtroSel = criarElemento('select', { class: 'agenda-filtro field-sm', id: 'filtro-barbeiro', 'aria-label': 'Filtrar por barbeiro' });
   filtroSel.append(criarElemento('option', { value: '', text: 'Todos os barbeiros' }));
-  // Somente barbeiros (cargo 'barbeiro') ativos podem receber novos agendamentos.
-  for (const p of suporte.profissionais.filter((x) => x.cargo === 'barbeiro' && x.ativo)) {
+  // Somente barbeiros (cargo 'barbeiro') ATIVOS e NÃO excluídos podem
+  // receber novos agendamentos.
+  for (const p of suporte.profissionais.filter((x) => x.cargo === 'barbeiro' && x.ativo && !x.deleted_at)) {
     filtroSel.append(criarElemento('option', { value: String(p.id), text: p.nome }));
   }
 
@@ -415,7 +416,7 @@ function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalv
   if (ehAdmin) {
     selBarbeiro = criarElemento('select', { name: 'barbeiro_id', class: 'input', required: true });
     selBarbeiro.append(criarElemento('option', { value: '', text: 'Selecione o barbeiro…', disabled: true, selected: true }));
-    for (const p of suporte.profissionais.filter((x) => x.cargo === 'barbeiro' && x.ativo)) {
+    for (const p of suporte.profissionais.filter((x) => x.cargo === 'barbeiro' && x.ativo && !x.deleted_at)) {
       selBarbeiro.append(criarElemento('option', { value: String(p.id), text: p.nome }));
     }
   }

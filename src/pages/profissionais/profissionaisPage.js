@@ -4,6 +4,7 @@ import {
   atualizarProfissional,
   alterarAtivoProfissional,
   criarAcessoProfissional,
+  excluirProfissional,
   mensagemErroProfissional,
 } from '../../services/profissionalService.js';
 import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
@@ -159,6 +160,30 @@ async function carregarProfissionais(lista, { ehAdmin, idAdminAtual }) {
       }
     });
   });
+  // Excluir (soft delete): somente admin; o banco valida as proteções
+  // (não excluir a si mesmo nem o único admin ativo).
+  tbody.querySelectorAll('[data-excluir-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = Number(btn.dataset.excluirId);
+      const p = profissionais.find((x) => x.id === id);
+      if (p) {
+        abrirModalConfirmacao({
+          titulo: 'Excluir profissional',
+          mensagem:
+            `Tem certeza que deseja excluir ${p.nome}? O histórico de agendamentos e bloqueios será preservado e o acesso ao sistema será bloqueado.`,
+          rotuloConfirmar: 'Excluir profissional',
+          aoConfirmar: async () => {
+            try {
+              await excluirProfissional(id, Boolean(p.auth_user_id));
+            } catch (erro) {
+              throw new Error(mensagemErroProfissional(erro));
+            }
+            await carregarProfissionais(lista, { ehAdmin, idAdminAtual });
+          },
+        });
+      }
+    });
+  });
 }
 
 function montarAcoes(p, { ehAdmin, ehAdminLinha, protegido }) {
@@ -195,6 +220,14 @@ function montarAcoes(p, { ehAdmin, ehAdminLinha, protegido }) {
       text: p.ativo ? 'Desativar' : 'Ativar',
     }));
   }
+
+  // Excluir (soft delete). O banco protege a si mesmo e o único admin ativo.
+  botoes.push(criarElemento('button', {
+    type: 'button',
+    class: 'btn btn-danger btn-sm',
+    'data-excluir-id': String(p.id),
+    text: 'Excluir',
+  }));
 
   return botoes;
 }
@@ -236,13 +269,14 @@ function abrirFormularioModal({ profissional = null, aoSalvar, aoFechar }) {
   });
 
   // Cargo: fixo como "Barbeiro" no cadastro; inalterável na edição.
-  const inputCargo = criarElemento('input', {
-    type: 'text',
-    class: 'input',
-    value: ehAdminLinha ? 'Admin' : 'Barbeiro',
-    readonly: true,
-    disabled: true,
-  });
+  // Exibido como badge somente leitura (não é campo editável).
+  const rotuloCargo = ehAdminLinha ? 'Admin' : 'Barbeiro';
+  const campoCargo = criarElemento('div', { class: 'form-field' }, [
+    criarElemento('span', { class: 'form-field-label', text: 'Cargo' }),
+    criarElemento('span', { class: 'form-field-badge' }, [
+      criarElemento('span', { class: `badge ${ehAdminLinha ? 'badge-accent' : 'badge-neutral'}`, text: rotuloCargo }),
+    ]),
+  ]);
 
   const inputAtivo = criarElemento('input', { type: 'checkbox', name: 'ativo' });
   if (profissional?.ativo) inputAtivo.setAttribute('checked', '');
@@ -257,18 +291,12 @@ function abrirFormularioModal({ profissional = null, aoSalvar, aoFechar }) {
     inputAtivo.disabled = true;
   }
 
-  // Aviso de acesso (novos barbeiros não têm acesso ainda).
-  const avisoAcesso = ehEdicao
-    ? null
-    : criarElemento('p', { class: 'alert alert-info', text: 'Este profissional ainda não possui acesso ao sistema.' });
-
   const form = criarElemento('form', { id: 'form-profissional' }, [
     criarCampoFormulario('Nome *', inputNome),
     criarCampoFormulario('Telefone', inputTelefone),
-    criarCampoFormulario('Cargo', inputCargo),
+    campoCargo,
   ]);
   if (ehEdicao) form.append(campoAtivo);
-  if (avisoAcesso) form.append(avisoAcesso);
   form.append(msgErro);
 
   const btnCancelar = criarElemento('button', { type: 'button', class: 'btn btn-secondary', text: 'Cancelar' });

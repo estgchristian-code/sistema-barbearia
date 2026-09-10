@@ -69,7 +69,8 @@ async function iniciarApp() {
 
   async function entrarNoPainel() {
     const profissional = await obterProfissionalAutenticado();
-    if (!profissional) {
+    // Profissional excluído (soft delete) retorna null — volta ao login.
+    if (!profissional || profissional.deleted_at) {
       mostrarLogin();
       return;
     }

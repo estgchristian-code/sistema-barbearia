@@ -51,6 +51,8 @@
 --       PostgreSQL rejeita valores fora do esquema esperado.
 
 -- (a) id do profissional ativo do usuário logado
+--     deleted_at IS NULL: profissional excluído (soft delete) NUNCA opera,
+--     mesmo se ativo for reativado por engano.
 CREATE OR REPLACE FUNCTION public.profissional_autenticado_id()
 RETURNS bigint
 LANGUAGE sql
@@ -62,6 +64,7 @@ AS $$
   FROM public.profissionais p
   WHERE p.auth_user_id = auth.uid()
     AND p.ativo = true
+    AND p.deleted_at IS NULL
   LIMIT 1;
 $$;
 
@@ -77,6 +80,7 @@ AS $$
   FROM public.profissionais p
   WHERE p.auth_user_id = auth.uid()
     AND p.ativo = true
+    AND p.deleted_at IS NULL
   LIMIT 1;
 $$;
 
@@ -93,6 +97,7 @@ AS $$
     WHERE p.auth_user_id = auth.uid()
       AND p.barbearia_id = p_barbearia
       AND p.ativo = true
+      AND p.deleted_at IS NULL
   );
 $$;
 
@@ -110,6 +115,7 @@ AS $$
       AND p.cargo = 'admin'
       AND p.barbearia_id = p_barbearia
       AND p.ativo = true
+      AND p.deleted_at IS NULL
   );
 $$;
 
@@ -128,6 +134,7 @@ AS $$
     WHERE p.auth_user_id = auth.uid()
       AND p.cargo = 'barbeiro'
       AND p.ativo = true
+      AND p.deleted_at IS NULL
   );
 $$;
 
@@ -345,6 +352,16 @@ BEGIN
          observacoes      = p_observacoes
    WHERE a.id = p_agendamento_id
      AND public.usuario_e_admin_da_barbearia(a.barbearia_id)
+     -- Barbeiro ativo e NÃO excluído da MESMA barbearia do agendamento
+     -- (a linha excluída permanece para o histórico, mas não pode ser
+     --  reatribuída em novos registros/edições).
+     AND EXISTS (
+       SELECT 1 FROM public.profissionais p
+        WHERE p.id = p_barbeiro_id
+          AND p.barbearia_id = a.barbearia_id
+          AND p.ativo = true
+          AND p.deleted_at IS NULL
+     )
      AND (
        p_status = a.status                              -- status inalterado
        OR public.transicao_status_valida(p_status, a.status)
@@ -391,6 +408,20 @@ BEGIN
     RAISE EXCEPTION 'novo agendamento deve iniciar com status pendente';
   END IF;
 
+  -- Barbeiro deve existir, ser da mesma barbearia, ativo e NÃO excluído
+  -- (a linha excluída permanece para o histórico, mas não recebe novos
+  -- agendamentos — o guard impede o contorno via RPC).
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profissionais p
+     WHERE p.id = p_barbeiro_id
+       AND p.barbearia_id = p_barbearia_id
+       AND p.cargo = 'barbeiro'
+       AND p.ativo = true
+       AND p.deleted_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'barbeiro inválido ou indisponível';
+  END IF;
+
   INSERT INTO public.agendamentos (
     barbearia_id, barbeiro_id, servico_id, cliente_id,
     data_hora_inicio, data_hora_fim, status, observacoes
@@ -421,6 +452,70 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'agendamento não encontrado ou pertence a outra barbearia';
+  END IF;
+END;
+$$;
+
+-- ------------------------------------------------------------------
+-- 9.3.B ADMIN — excluir profissional (soft delete, NUNCA DELETE físico)
+-- ------------------------------------------------------------------
+-- Excluir = marcar deleted_at = now() + ativo = false. A linha permanece
+-- para preservar o histórico (FKs RESTRICT de agendamentos/bloqueios). A
+-- remoção do acesso (Supabase Auth) é feita em etapa separada, do servidor
+-- (Edge Function remover-acesso-profissional). O id/barbearia do alvo NUNCA
+-- vêm do payload: a barbearia é derivada do REGISTRO do profissional.
+CREATE OR REPLACE FUNCTION public.admin_excluir_profissional(p_profissional_id bigint)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_barbearia        bigint;
+  v_cargo            text;
+  v_id_autenticado   bigint;
+BEGIN
+  SELECT p.barbearia_id, p.cargo
+    INTO v_barbearia, v_cargo
+    FROM public.profissionais p
+   WHERE p.id = p_profissional_id;
+
+  IF v_barbearia IS NULL THEN
+    RAISE EXCEPTION 'profissional não encontrado';
+  END IF;
+
+  -- Somente Admin da MESMA barbearia do profissional alvo.
+  IF NOT public.usuario_e_admin_da_barbearia(v_barbearia) THEN
+    RAISE EXCEPTION 'somente admin da própria barbearia pode excluir profissional';
+  END IF;
+
+  -- O admin não pode excluir o próprio cadastro (ficaria sem acesso).
+  v_id_autenticado := public.profissional_autenticado_id();
+  IF v_id_autenticado = p_profissional_id THEN
+    RAISE EXCEPTION 'você não pode excluir o próprio cadastro';
+  END IF;
+
+  -- Não pode excluir o ÚNICO admin ativo (não excluído) da barbearia.
+  IF v_cargo = 'admin' AND NOT EXISTS (
+    SELECT 1 FROM public.profissionais p
+     WHERE p.barbearia_id = v_barbearia
+       AND p.cargo = 'admin'
+       AND p.ativo = true
+       AND p.deleted_at IS NULL
+       AND p.id <> p_profissional_id
+  ) THEN
+    RAISE EXCEPTION 'não é possível excluir o único administrador da barbearia';
+  END IF;
+
+  UPDATE public.profissionais
+     SET deleted_at = now(),
+         ativo      = false,
+         updated_at = now()
+   WHERE id = p_profissional_id
+     AND deleted_at IS NULL;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'profissional não encontrado ou já excluído';
   END IF;
 END;
 $$;
@@ -782,6 +877,7 @@ REVOKE ALL ON FUNCTION public.transicao_status_valida(text, text) FROM PUBLIC, a
 REVOKE ALL ON FUNCTION public.admin_atualizar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.admin_criar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.admin_excluir_agendamento(bigint) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_excluir_profissional(bigint) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.barbeiro_atualizar_status(bigint, text, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.barbeiro_criar_agendamento(bigint, bigint, timestamp with time zone, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.listar_clientes_para_agendamento() FROM PUBLIC, anon;
@@ -789,6 +885,7 @@ GRANT EXECUTE ON FUNCTION public.transicao_status_valida(text, text) TO authenti
 GRANT EXECUTE ON FUNCTION public.admin_atualizar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_criar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_excluir_agendamento(bigint) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_excluir_profissional(bigint) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.barbeiro_atualizar_status(bigint, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.barbeiro_criar_agendamento(bigint, bigint, timestamp with time zone, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.listar_clientes_para_agendamento() TO authenticated;

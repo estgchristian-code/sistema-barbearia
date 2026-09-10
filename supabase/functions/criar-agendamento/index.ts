@@ -299,13 +299,15 @@ async function criarAgendamentoPublico(entrada: Entrada, inicio: Date) {
     if (barbearias.length === 0) throw negocio(404, "Barbearia não encontrada.");
     const barbeariaId = Number(barbearias[0].id);
 
-    // 2) Profissional existe, é da mesma barbearia, cargo barbeiro e ativo.
+    // 2) Profissional existe, é da mesma barbearia, cargo barbeiro, ativo
+    //    e NÃO excluído (soft delete).
     const profissionais = await tx`
       select id, nome from public.profissionais
       where id = ${entrada.barbeiro_id}
         and barbearia_id = ${barbeariaId}
         and cargo = 'barbeiro'
         and ativo = true
+        and deleted_at is null
       limit 1
     `;
     if (profissionais.length === 0) {

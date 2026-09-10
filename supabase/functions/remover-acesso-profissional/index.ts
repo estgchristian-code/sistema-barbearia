@@ -1,17 +1,28 @@
 // ===========================================================================
-// Edge Function: criar-acesso-profissional
+// Edge Function: remover-acesso-profissional
 //
-// Cria um usuário no Supabase Auth e vincula ao registro de profissional.
-// Somente administradores da barbearia podem executar esta operação.
+// Remove o usuário do Supabase Auth de um profissional EXCLUÍDO (soft
+// delete). A exclusão lógica em si é feita pela RPC admin_excluir_profissional;
+// esta função serve apenas para "matar" o login do profissional excluído.
+//
+// Fluxo (secure):
+//   1. Frontend chama a RPC admin_excluir_profissional (marca deleted_at +
+//      ativo = false). A partir daí o profissional já não opera (RLS exige
+//      deleted_at IS NULL em todas as funções auxiliares).
+//   2. Frontend (ou operação server-side) chama ESTA função para remover o
+//      usuário Auth. A FK profissionais.auth_user_id -> auth.users(id) com
+//      ON DELETE SET NULL desvincula automaticamente o auth_user_id.
 //
 // Segurança:
 //   - verify_jwt = true (plataforma garante JWT válido).
-//   -service_role SOMENTE dentro desta Edge Function.
-//   - Verifica que o chamador é admin da barbearia do profissional.
+//   - service_role SOMENTE dentro desta Edge Function (API de admin Auth).
+//   - Verifica que o chamador é ADMIN da mesma barbearia do profissional.
+//   - Só remove acesso de profissional com deleted_at IS NOT NULL — esta
+//     função NÃO funciona como "revogar acesso" genérico.
 //   - Não expõe service_role, nem logs, nem erros internos ao cliente.
 //
 // Deploy:
-//   supabase functions deploy criar-acesso-profissional
+//   supabase functions deploy remover-acesso-profissional
 //   (com --verify-jwt, que é o padrão).
 // ===========================================================================
 
@@ -29,7 +40,7 @@ const sql = postgres(
 );
 
 // ---------------------------------------------------------------------------
-// CORS — usa PUBLIC_ORIGINS (mesmo padrão de criar-agendamento).
+// CORS — usa PUBLIC_ORIGINS (mesmo padrão das demais funções).
 // ---------------------------------------------------------------------------
 const ALLOWED_ORIGINS = (Deno.env.get("PUBLIC_ORIGINS") ?? "")
   .split(",")
@@ -71,17 +82,11 @@ function extrairToken(req: Request): string | null {
   return null;
 }
 
-function validarEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
 // ---------------------------------------------------------------------------
 // Validação de entrada
 // ---------------------------------------------------------------------------
 interface Entrada {
   profissional_id: number;
-  email: string;
-  senha: string;
 }
 
 function parseEntrada(body: unknown): { entrada: Entrada | null; erro?: string } {
@@ -95,17 +100,7 @@ function parseEntrada(body: unknown): { entrada: Entrada | null; erro?: string }
     return { entrada: null, erro: "profissional_id inválido." };
   }
 
-  const email = String(b.email ?? "").trim().toLowerCase();
-  if (!email || !validarEmail(email)) {
-    return { entrada: null, erro: "E-mail inválido." };
-  }
-
-  const senha = String(b.senha ?? "");
-  if (senha.length < 8) {
-    return { entrada: null, erro: "A senha deve ter pelo menos 8 caracteres." };
-  }
-
-  return { entrada: { profissional_id, email, senha } };
+  return { entrada: { profissional_id } };
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +127,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // Decodifica o JWT para obter o sub (auth user id).
-  // O平台 já verificou a assinatura (verify_jwt = true).
+  // A plataforma já verificou a assinatura (verify_jwt = true).
   let payload: Record<string, unknown>;
   try {
     const payloadB64 = token.split(".")[1];
@@ -173,117 +168,65 @@ Deno.serve(async (req: Request) => {
       LIMIT 1
     `;
     if (admins.length === 0) {
-      return erro(403, "Somente administradores podem criar acessos.", headers);
+      return erro(403, "Somente administradores podem remover acessos.", headers);
     }
     const barbeariaId = Number(admins[0].barbearia_id);
 
-    // 2) Verificar que o profissional existe, pertence à mesma barbearia,
-    //    ainda NÃO foi excluído (soft delete) e ainda não possui acesso.
+    // 2) Verificar que existe um profissional EXCLUÍDO (deleted_at não nulo)
+    //    da mesma barbearia. Esta função não serve para revogar acesso de
+    //    profissionais ativos/desativados — apenas do fluxo de exclusão.
     const profs = await sql`
-      SELECT id, auth_user_id, cargo
+      SELECT id, auth_user_id
       FROM public.profissionais
       WHERE id = ${entrada.profissional_id}
         AND barbearia_id = ${barbeariaId}
-        AND deleted_at IS NULL
+        AND deleted_at IS NOT NULL
       LIMIT 1
     `;
     if (profs.length === 0) {
-      return erro(404, "Profissional não encontrado nesta barbearia.", headers);
-    }
-    if (profs[0].auth_user_id) {
-      return erro(
-        409,
-        "Este profissional já possui acesso ao sistema.",
-        headers,
-      );
+      return erro(404, "Profissional excluído não encontrado nesta barbearia.", headers);
     }
 
-    // 3) Criar usuário no Supabase Auth via API admin.
-    const authRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SERVICE_ROLE_KEY,
-      },
-      body: JSON.stringify({
-        email: entrada.email,
-        password: entrada.senha,
-        email_confirm: true,
-        user_metadata: {
-          barbearia_id: barbeariaId,
-          profissional_id: entrada.profissional_id,
-          cargo: profs[0].cargo,
-        },
-      }),
-    });
-
-    const authData = await authRes.json();
-
-    if (!authRes.ok) {
-      const msg = authData?.msg || authData?.message || "";
-      const errorDescription = authData?.error_description || "";
-
-      // E-mail duplicado no Auth.
-      if (
-        authRes.status === 409 ||
-        msg.toLowerCase().includes("already") ||
-        errorDescription.toLowerCase().includes("already")
-      ) {
-        return erro(
-          409,
-          "Este e-mail já está cadastrado no sistema.",
-          headers,
-        );
-      }
-
-      console.error("[criar-acesso-profissional] auth error", authRes.status, authData);
-      return erro(500, "Erro ao criar usuário de acesso.", headers);
-    }
-
-    const authUserId = authData?.id;
+    // 3) Sem usuário Auth vinculado: nada a fazer (por exemplo, o vínculo já
+    //    foi desfeito pelo ON DELETE SET NULL ou nunca existiu).
+    const authUserId = profs[0].auth_user_id;
     if (!authUserId) {
-      console.error("[criar-acesso-profissional] auth response sem id", authData);
-      return erro(500, "Erro ao criar usuário de acesso.", headers);
+      return ok({ removido: false, motivo: "sem_vínculo_auth" }, headers);
     }
 
-    // 4) Vincular auth_user_id ao profissional.
-    //    A constraint uq_profissionais_auth_user previne duplicatas.
-    const atualizados = await sql`
-      UPDATE public.profissionais
-      SET auth_user_id = ${authUserId}::uuid,
-          updated_at  = now()
-      WHERE id = ${entrada.profissional_id}
-        AND barbearia_id = ${barbeariaId}
-        AND auth_user_id IS NULL
-      RETURNING id, auth_user_id
-    `;
-
-    if (atualizados.length === 0) {
-      // O profissional pode ter sido vinculado por outra requisição
-      // simultânea. Tentar limpar o usuário Auth criado.
-      console.error(
-        "[criar-acesso-profissional] falha ao vincular — profissional pode ter sido vinculado por outra requisição",
-      );
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${authUserId}`, {
+    // 4) Remover o usuário no Supabase Auth via API admin.
+    const authRes = await fetch(
+      `${SUPABASE_URL}/auth/v1/admin/users/${authUserId}`,
+      {
         method: "DELETE",
         headers: {
           apikey: SERVICE_ROLE_KEY,
         },
-      }).catch(() => {
-        // Se a limpeza falhar, o usuário Auth ficará órfão.
-        // Pode ser removido manualmente no Dashboard.
-      });
+      },
+    );
 
-      return erro(
-        409,
-        "Este profissional já possui acesso ao sistema.",
-        headers,
+    if (!authRes.ok) {
+      const authData = await authRes.json().catch(() => null);
+
+      // 404 = usuário Auth já não existe (foi removido por outra via).
+      if (authRes.status === 404) {
+        return ok({ removido: false, motivo: "auth_inexistente" }, headers);
+      }
+
+      console.error(
+        "[remover-acesso-profissional] auth error",
+        authRes.status,
+        authData,
       );
+      return erro(500, "Não foi possível remover o usuário de acesso.", headers);
     }
 
-    return ok({ auth_user_id: authUserId }, headers);
+    // A FK (auth_user_id -> auth.users ON DELETE SET NULL) desvincula
+    // automaticamente o auth_user_id. Não há ação extra no banco aqui.
+
+    return ok({ removido: true, auth_user_id: authUserId }, headers);
   } catch (err) {
-    console.error("[criar-acesso-profissional] erro interno", err);
-    return erro(500, "Erro interno ao criar acesso.", headers);
+    console.error("[remover-acesso-profissional] erro interno", err);
+    return erro(500, "Erro interno ao remover acesso.", headers);
   }
 });

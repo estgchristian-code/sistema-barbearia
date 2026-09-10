@@ -11,7 +11,7 @@ import {
   excluirBloqueio,
   mensagemErroBloqueio,
 } from '../../services/bloqueioService.js';
-import { listarProfissionaisDaBarbearia } from '../../services/profissionalService.js';
+import { listarProfissionaisIncluindoExcluidos } from '../../services/profissionalService.js';
 import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
 import { abrirModal, criarMensagem, abrirModalConfirmacao } from '../../components/modal.js';
 
@@ -251,7 +251,7 @@ async function carregarBloqueios(bloco, { ehAdmin }) {
   try {
     [bloqueios, profissionais] = await Promise.all([
       listarBloqueiosDaBarbearia(),
-      listarProfissionaisDaBarbearia(),
+      listarProfissionaisIncluindoExcluidos(),
     ]);
   } catch (erro) {
     estado.remove();
@@ -261,7 +261,9 @@ async function carregarBloqueios(bloco, { ehAdmin }) {
 
   estado.remove();
 
-  ativos = (profissionais || []).filter((p) => p.ativo);
+  // Para o SELETOR: somente profissionais ativos e NÃO excluídos. A lista
+  // completa (com excluídos) é usada apenas para exibir nomes no histórico.
+  ativos = (profissionais || []).filter((p) => p.ativo && !p.deleted_at);
 
   const lista = criarElemento('div');
   bloco.append(lista);
@@ -276,7 +278,7 @@ async function carregarBloqueios(bloco, { ehAdmin }) {
     );
   } else {
     for (const b of bloqueios) {
-      lista.append(montarCartaoBloqueio(b, ativos, { ehAdmin, aoEditar, aoExcluir }));
+      lista.append(montarCartaoBloqueio(b, profissionais, { ehAdmin, aoEditar, aoExcluir }));
     }
   }
 
