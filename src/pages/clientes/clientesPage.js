@@ -3,6 +3,7 @@ import {
   criarCliente,
   atualizarCliente,
   alterarAtivoCliente,
+  editarClienteBarbeiro,
   mensagemErroCliente,
   validarTelefoneBrasileiro,
 } from '../../services/clienteService.js';
@@ -37,7 +38,7 @@ export async function renderizarClientes(conteudo, contexto) {
 
   if (profissional?.cargo === 'barbeiro') {
     conteudo.append(
-      criarElemento('p', { class: 'alert alert-info', text: 'Você pode cadastrar novos clientes. Somente administradores podem editar ou ativar/desativar clientes.' })
+      criarElemento('p', { class: 'alert alert-info', text: 'Você pode cadastrar e editar clientes. Somente administradores podem ativar/desativar clientes.' })
     );
   } else if (!permiteGerenciar) {
     conteudo.append(
@@ -68,7 +69,7 @@ export async function renderizarClientes(conteudo, contexto) {
       abrirFormularioModal({
         aposSalvar: () => carregarClientes(lista, { permiteGerenciar, filtro: '' }),
         // Barbeiro cadastra sempre como ativo (não tem poder administrativo).
-        mostrarAtivo: permiteGerenciar,
+        permiteGerenciar,
       });
     });
   }
@@ -158,6 +159,7 @@ async function carregarClientes(lista, { permiteGerenciar, filtro }) {
         abrirFormularioModal({
           cliente,
           aposSalvar: () => carregarClientes(lista, { permiteGerenciar, filtro: '' }),
+          permiteGerenciar,
         });
       }
     });
@@ -182,8 +184,17 @@ async function carregarClientes(lista, { permiteGerenciar, filtro }) {
 }
 
 function montarAcoes(cliente, { permiteGerenciar }) {
-  // Barbeiro NÃO edita nem ativa/desativa clientes (somente cadastra).
-  if (!permiteGerenciar) return [criarElemento('span', { text: '—' })];
+  // Barbeiro EDITA clientes (RPC editar_cliente, somente os 4 campos),
+  // mas NÃO ativa/desativa (exclusivo do admin).
+  if (!permiteGerenciar) {
+    const editar = criarElemento('button', {
+      type: 'button',
+      class: 'btn btn-secondary btn-sm',
+      'data-edit-id': String(cliente.id),
+      text: 'Editar',
+    });
+    return [editar];
+  }
   const toggle = criarElemento('button', {
     type: 'button',
     class: 'btn btn-ghost btn-sm',
@@ -209,7 +220,7 @@ function criarBadgeStatus(ativo) {
 
 // ------------------------- Formulário (cadastro/edição) em modal -------------------------
 
-function abrirFormularioModal({ cliente = null, aposSalvar, mostrarAtivo = true }) {
+function abrirFormularioModal({ cliente = null, aposSalvar, permiteGerenciar = false }) {
   const ehEdicao = Boolean(cliente);
   const msgErro = criarMensagem('danger');
 
@@ -252,9 +263,9 @@ function abrirFormularioModal({ cliente = null, aposSalvar, mostrarAtivo = true 
     ]),
     criarCampoFormulario('Observações', areaObservacoes),
   ];
-  // Barbeiro cadastra sempre como ativo (sem poder administrativo): o
-  // campo só aparece para quem pode gerenciar (admin).
-  if (mostrarAtivo) {
+  // Barbeiro (sem poder administrativo) nunca vê o campo Ativo: edita/cria
+  // sempre como ativo; o servidor reforça via RPC criar_cliente/editar_cliente.
+  if (permiteGerenciar) {
     itensForm.push(
       criarElemento('label', { class: 'form-linha' }, [
         inputAtivo,
@@ -289,7 +300,7 @@ function abrirFormularioModal({ cliente = null, aposSalvar, mostrarAtivo = true 
       email: inputEmail.value.trim(),
       observacoes: areaObservacoes.value.trim(),
       // Barbeiro (sem o campo no form) é sempre ativo; o servidor reforça.
-      ativo: mostrarAtivo ? inputAtivo.checked : true,
+      ativo: permiteGerenciar ? inputAtivo.checked : true,
     };
 
     const erroValidacao = validarDados(dados);
@@ -303,7 +314,14 @@ function abrirFormularioModal({ cliente = null, aposSalvar, mostrarAtivo = true 
 
     try {
       if (ehEdicao) {
-        await atualizarCliente(cliente.id, dados);
+        if (permiteGerenciar) {
+          // Admin: mantém o comportamento atual (update direto, inclui ativo).
+          await atualizarCliente(cliente.id, dados);
+        } else {
+          // Barbeiro: edita SOMENTE os 4 campos pela RPC editar_cliente
+          // (ativo/created_at nunca são alterados pelo servidor).
+          await editarClienteBarbeiro(cliente.id, dados);
+        }
         toastSucesso('Cliente atualizado com sucesso.');
       } else {
         await criarCliente(dados);

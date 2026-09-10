@@ -788,6 +788,84 @@ END;
 $$;
 
 -- ------------------------------------------------------------------
+-- 9.4.F EDIÇÃO de clientes pelo barbeiro — RPC public.editar_cliente
+--      (migration 007)
+-- ------------------------------------------------------------------
+-- Regra aprovada:
+--   * ADMIN   : cria, edita e ativa/desativa clientes (INALTERADO — segue
+--     pelo UPDATE direto via policy clientes_write_admin).
+--   * BARBEIRO: cria (RPC 9.4.D) e EDITA APENAS nome, telefone, e-mail e
+--     observações de clientes da PRÓPRIA barbearia; NÃO ativa/desativa.
+--
+-- A RPC:
+--   * NÃO aceita p_ativo nem p_barbearia_id — a barbearia é SEMPRE
+--     derivada do auth.uid() (profissionais.auth_user_id), nunca do request;
+--   * aceita profissional ativo (admin OU barbeiro) da própria barbearia;
+--     sem vínculo / inativo / excluído (M005) => rejeitado;
+--   * UPDATE SOMENTE nas 4 colunas permitidas; ativo e created_at jamais
+--     são tocados; updated_at é mantido pelo trg_clientes_updated_at;
+--   * WHERE com a barbearia derivada rejeita cliente de outra barbearia;
+--   * validação server-side mínima (nome/telefone obrigatórios, e-mail no
+--     formato), réplica das validações do painel.
+-- Segurança: SECURITY DEFINER + SET search_path='' + REVOKE de
+-- PUBLIC/anon + GRANT EXECUTE só a authenticated. NENHUMA policy de UPDATE
+-- para barbeiro e NENHUM grant de tabela novo (só o admin tem policy de
+-- escrita) — a RPC é a ÚNICA via de edição do barbeiro.
+CREATE OR REPLACE FUNCTION public.editar_cliente(
+  p_cliente_id bigint,
+  p_nome text,
+  p_telefone text,
+  p_email text DEFAULT NULL,
+  p_observacoes text DEFAULT NULL
+)
+RETURNS public.clientes
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_barbearia bigint;
+  v_cliente   public.clientes;
+BEGIN
+  v_barbearia := public.barbearia_profissional_autenticado();
+
+  IF v_barbearia IS NULL THEN
+    RAISE EXCEPTION 'somente um profissional ativo da barbearia pode editar clientes';
+  END IF;
+
+  IF NOT public.usuario_e_admin_da_barbearia(v_barbearia)
+     AND NOT public.usuario_e_barbeiro_autenticado() THEN
+    RAISE EXCEPTION 'somente um profissional ativo da barbearia pode editar clientes';
+  END IF;
+
+  IF trim(coalesce(p_nome, '')) = '' THEN
+    RAISE EXCEPTION 'nome do cliente é obrigatório';
+  END IF;
+  IF trim(coalesce(p_telefone, '')) = '' THEN
+    RAISE EXCEPTION 'telefone do cliente é obrigatório';
+  END IF;
+  IF p_email IS NOT NULL AND p_email !~* '^[^@\s]+@[^@\s]+$' THEN
+    RAISE EXCEPTION 'e-mail inválido';
+  END IF;
+
+  UPDATE public.clientes
+     SET nome        = trim(p_nome),
+         telefone    = trim(p_telefone),
+         email       = nullif(trim(coalesce(p_email, '')), ''),
+         observacoes = nullif(trim(coalesce(p_observacoes, '')), '')
+   WHERE id = p_cliente_id
+     AND barbearia_id = v_barbearia
+  RETURNING * INTO v_cliente;
+
+  IF v_cliente.id IS NULL THEN
+    RAISE EXCEPTION 'cliente não encontrado ou de outra barbearia';
+  END IF;
+
+  RETURN v_cliente;
+END;
+$$;
+
+-- ------------------------------------------------------------------
 -- 9.5 AUTORIDADE DE BLOQUEIOS E HORÁRIO (server-side, elimina corrida)
 -- ------------------------------------------------------------------
 -- Garante, NO BANCO, que um agendamento nunca seja confirmado em intervalo
@@ -1001,8 +1079,10 @@ GRANT EXECUTE ON FUNCTION public.barbeiro_criar_agendamento(bigint, bigint, time
 GRANT EXECUTE ON FUNCTION public.listar_clientes_para_agendamento() TO authenticated;
 REVOKE ALL ON FUNCTION public.criar_cliente(text, text, text, text, boolean) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.listar_clientes_da_barbearia() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.editar_cliente(bigint, text, text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.criar_cliente(text, text, text, text, boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.listar_clientes_da_barbearia() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.editar_cliente(bigint, text, text, text, text) TO authenticated;
 
 -- =====================================================================
 -- 10. POLICIES — horarios_funcionamento e bloqueios_agenda

@@ -94,6 +94,26 @@ export async function alterarAtivoCliente(id, ativo) {
   return data;
 }
 
+export async function editarClienteBarbeiro(id, dados) {
+  const erroValidacao = validarDadosCliente(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
+  // Única via de edição do barbeiro: RPC public.editar_cliente (M007).
+  // A RPC NÃO aceita p_ativo nem p_barbearia_id: a barbearia é derivada
+  // do auth.uid() no banco; ativo e created_at jamais são tocados; o
+  // servidor rejeita cliente de outra barbearia.
+  const { data, error } = await supabase.rpc('editar_cliente', {
+    p_cliente_id: id,
+    p_nome: normalizarTexto(dados.nome, true),
+    p_telefone: normalizarTexto(dados.telefone, true),
+    p_email: normalizarTextoOpcional(dados.email),
+    p_observacoes: normalizarTextoOpcional(dados.observacoes),
+  });
+
+  if (error) throw error;
+  return data;
+}
+
 // Validação de negócio única para cadastro e edição de cliente.
 // Rejeita nome/telefone vazios, telefone brasileiro inválido e e-mail malformado.
 function validarDadosCliente(dados) {
@@ -130,7 +150,10 @@ export function mensagemErroCliente(erro) {
     return 'Informe um e-mail válido.';
   }
   if (mensagem.includes('somente um profissional ativo da barbearia')) {
-    return 'Somente um profissional ativo da barbearia pode cadastrar ou listar clientes.';
+    return 'Somente um profissional ativo da barbearia pode cadastrar, editar ou listar clientes.';
+  }
+  if (mensagem.includes('cliente não encontrado ou de outra barbearia')) {
+    return 'Cliente não encontrado ou pertence a outra barbearia.';
   }
 
   // Violação do CHECK de e-mail (chk_clientes_email).
