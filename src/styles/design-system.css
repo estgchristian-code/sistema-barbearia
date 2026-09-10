@@ -674,6 +674,10 @@ textarea.input[aria-invalid='true'] {
   justify-content: flex-end;
 }
 
+.table .acao-cel .btn {
+  min-width: 7.5rem;
+}
+
 /*-------------------------------- CARREGAMENTO --------------------------- */
 .loading {
   display: inline-flex;
