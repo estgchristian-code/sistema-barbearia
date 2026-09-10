@@ -19,13 +19,13 @@
   --text-secondary: #a1a1aa;
   --text-muted: #71717a;
 
-  /* Acento (âmbar/cobre) */
-  --accent: #f59e0b;
-  --accent-hover: #fbbf24;
-  --accent-strong: #d97706;
+  /* Acento (amarelo vivo) */
+  --accent: #facc15;
+  --accent-hover: #fde047;
+  --accent-strong: #ca8a04;
   --accent-contrast: #1c1005;
-  --accent-soft: rgba(245, 158, 11, 0.12);
-  --accent-border: rgba(245, 158, 11, 0.35);
+  --accent-soft: rgba(250, 204, 21, 0.12);
+  --accent-border: rgba(250, 204, 21, 0.35);
 
   /* Semânticas */
   --success: #4ade80;
@@ -272,7 +272,7 @@ a:hover {
 }
 
 .btn-accent:hover:not(:disabled) {
-  background: rgba(245, 158, 11, 0.18);
+  background: rgba(250, 204, 21, 0.18);
   border-color: var(--accent);
 }
 

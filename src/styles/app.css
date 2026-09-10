@@ -149,7 +149,7 @@
 }
 
 .dashboard-card.destaque {
-  background: linear-gradient(160deg, var(--accent-soft), rgba(217, 142, 55, 0.05) 55%, var(--surface));
+  background: linear-gradient(160deg, var(--accent-soft), rgba(250, 204, 21, 0.05) 55%, var(--surface));
 }
 
 .dashboard-card.destaque::before {
