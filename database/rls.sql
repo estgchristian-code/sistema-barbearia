@@ -678,6 +678,116 @@ END;
 $$;
 
 -- ------------------------------------------------------------------
+-- 9.4.D CADASTRO de clientes — RPC public.criar_cliente (M006)
+-- ------------------------------------------------------------------
+-- Regra aprovada: barbeiro CADASTRA novos clientes e os usa em
+-- agendamentos; NÃO edita, NÃO desativa e NÃO recebe outras permissões
+-- administrativas. Admin mantém criar/editar/ativar/desativar.
+--
+-- Esta é a ÚNICA via de criação em clientes (REVOKE INSERT na seção 11):
+--   * p_barbearia_id/p_barbeiro_id NUNCA são aceitos — a barbearia é
+--     DERIVADA do auth.uid() no banco;
+--   * aceita admin OU barbeiro ativo (e não excluído — M005) da própria
+--     barbearia;
+--   * para barbeiro, força ativo = true (sem poder administrativo);
+--   * validação server-side mínima (nome/telefone/e-mail).
+CREATE OR REPLACE FUNCTION public.criar_cliente(
+  p_nome text,
+  p_telefone text,
+  p_email text DEFAULT NULL,
+  p_observacoes text DEFAULT NULL,
+  p_ativo boolean DEFAULT true
+)
+RETURNS public.clientes
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_barbearia bigint;
+  v_cliente   public.clientes;
+  v_admin     boolean;
+BEGIN
+  v_barbearia := public.barbearia_profissional_autenticado();
+
+  IF v_barbearia IS NULL THEN
+    RAISE EXCEPTION 'somente um profissional ativo da barbearia pode cadastrar clientes';
+  END IF;
+
+  v_admin := public.usuario_e_admin_da_barbearia(v_barbearia);
+  IF NOT v_admin AND NOT public.usuario_e_barbeiro_autenticado() THEN
+    RAISE EXCEPTION 'somente um profissional ativo da barbearia pode cadastrar clientes';
+  END IF;
+
+  -- Barbeiro NÃO possui poder administrativo: não pode criar cliente inativo.
+  IF NOT v_admin THEN
+    p_ativo := true;
+  END IF;
+
+  -- Validação server-side mínima (réplica das regras do painel/da tabela).
+  IF trim(coalesce(p_nome, '')) = '' THEN
+    RAISE EXCEPTION 'nome do cliente é obrigatório';
+  END IF;
+  IF trim(coalesce(p_telefone, '')) = '' THEN
+    RAISE EXCEPTION 'telefone do cliente é obrigatório';
+  END IF;
+  IF p_email IS NOT NULL AND p_email !~* '^[^@\s]+@[^@\s]+$' THEN
+    RAISE EXCEPTION 'e-mail inválido';
+  END IF;
+
+  INSERT INTO public.clientes (barbearia_id, nome, telefone, email, observacoes, ativo)
+  VALUES (
+    v_barbearia,
+    trim(p_nome),
+    trim(p_telefone),
+    nullif(trim(coalesce(p_email, '')), ''),
+    nullif(trim(coalesce(p_observacoes, '')), ''),
+    p_ativo
+  )
+  RETURNING * INTO v_cliente;
+
+  RETURN v_cliente;
+END;
+$$;
+
+-- ------------------------------------------------------------------
+-- 9.4.E LEITURA (M006) — clientes (campos completos) da própria barbearia
+-- ------------------------------------------------------------------
+-- A policy clientes_select_propria limita o barbeiro a clientes com quem já
+-- tem agendamento — o recém-criado não apareceria. Esta RPC (SECURITY
+-- DEFINER, sem ampliar policies/RLS) devolve os clientes da PRÓPRIA
+-- barbearia do profissional autenticado, com a MESMA visão do admin.
+CREATE OR REPLACE FUNCTION public.listar_clientes_da_barbearia()
+RETURNS TABLE (
+  id           bigint,
+  barbearia_id bigint,
+  nome         text,
+  telefone     text,
+  email        text,
+  observacoes  text,
+  ativo        boolean,
+  created_at   timestamp with time zone,
+  updated_at   timestamp with time zone
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF public.profissional_autenticado_id() IS NULL THEN
+    RAISE EXCEPTION 'somente um profissional ativo da barbearia pode listar clientes';
+  END IF;
+
+  RETURN QUERY
+    SELECT c.id, c.barbearia_id, c.nome, c.telefone, c.email, c.observacoes,
+           c.ativo, c.created_at, c.updated_at
+      FROM public.clientes c
+     WHERE c.barbearia_id = public.barbearia_profissional_autenticado()
+     ORDER BY c.nome;
+END;
+$$;
+
+-- ------------------------------------------------------------------
 -- 9.5 AUTORIDADE DE BLOQUEIOS E HORÁRIO (server-side, elimina corrida)
 -- ------------------------------------------------------------------
 -- Garante, NO BANCO, que um agendamento nunca seja confirmado em intervalo
@@ -889,6 +999,10 @@ GRANT EXECUTE ON FUNCTION public.admin_excluir_profissional(bigint) TO authentic
 GRANT EXECUTE ON FUNCTION public.barbeiro_atualizar_status(bigint, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.barbeiro_criar_agendamento(bigint, bigint, timestamp with time zone, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.listar_clientes_para_agendamento() TO authenticated;
+REVOKE ALL ON FUNCTION public.criar_cliente(text, text, text, text, boolean) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.listar_clientes_da_barbearia() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.criar_cliente(text, text, text, text, boolean) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.listar_clientes_da_barbearia() TO authenticated;
 
 -- =====================================================================
 -- 10. POLICIES — horarios_funcionamento e bloqueios_agenda
@@ -946,16 +1060,20 @@ GRANT SELECT ON public.barbearias, public.profissionais, public.servicos,
   public.clientes, public.agendamentos,
   public.horarios_funcionamento, public.bloqueios_agenda TO authenticated;
 
--- Escrita nas demais tabelas (fora de agendamentos):
---   * profissionais/servicos/clientes/horarios/bloqueios: admin usa
+-- Escrita nas demais tabelas (fora de agendamentos e fora da CRIAÇÃO de
+-- clientes):
+--   * profissionais/servicos/horarios/bloqueios: admin usa
 --     (linhas restritas por RLS via usuario_e_admin_da_barbearia).
+--   * clientes: SEM INSERT direto — a criação (admin OU barbeiro) passa
+--     SOMENTE pela RPC public.criar_cliente (seção 9.4.D). UPDATE e DELETE
+--     continuam com o admin via policy clientes_write_admin.
 --   * barbearias: admin edita a própria (UPDATE); ninguém cria/exclui
 --     barbearia pela API.
 --   * agendamentos: NÃO ENTRA AQUI (fica sem INSERT/UPDATE/DELETE para
 --     não dar ao barbeiro um caminho de escrita de qualquer coluna).
 GRANT INSERT, UPDATE, DELETE ON public.profissionais, public.servicos,
-  public.clientes, public.horarios_funcionamento, public.bloqueios_agenda
-  TO authenticated;
+  public.horarios_funcionamento, public.bloqueios_agenda TO authenticated;
+GRANT UPDATE, DELETE ON public.clientes TO authenticated;
 GRANT UPDATE ON public.barbearias TO authenticated;
 
 -- =====================================================================

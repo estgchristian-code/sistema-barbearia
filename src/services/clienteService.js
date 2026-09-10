@@ -29,14 +29,10 @@ async function obterBarbeariaDoProfissional() {
 }
 
 export async function listarClientesDaBarbearia() {
-  const barbeariaId = await obterBarbeariaDoProfissional();
-
-  const { data, error } = await supabase
-    .from('clientes')
-    .select(CAMPOS_CLIENTE)
-    .eq('barbearia_id', barbeariaId)
-    .order('nome', { ascending: true });
-
+  // Leitura via RPC SECURITY DEFINER: devolve os clientes da PRÓPRIA
+  // barbearia do profissional autenticado (admin e barbeiro com a mesma
+  // visão), sem ampliar policies/RLS.
+  const { data, error } = await supabase.rpc('listar_clientes_da_barbearia');
   if (error) throw error;
   return data || [];
 }
@@ -45,20 +41,15 @@ export async function criarCliente(dados) {
   const erroValidacao = validarDadosCliente(dados);
   if (erroValidacao) throw new Error(erroValidacao);
 
-  const barbeariaId = await obterBarbeariaDoProfissional();
-
-  const { data, error } = await supabase
-    .from('clientes')
-    .insert({
-      barbearia_id: barbeariaId,
-      nome: normalizarTexto(dados.nome, true),
-      telefone: normalizarTexto(dados.telefone, true),
-      email: normalizarTextoOpcional(dados.email),
-      observacoes: normalizarTextoOpcional(dados.observacoes),
-      ativo: Boolean(dados.ativo),
-    })
-    .select(CAMPOS_CLIENTE)
-    .single();
+  // A criação (admin E barbeiro) passa SOMENTE pela RPC public.criar_cliente:
+  // barbearia_id é derivado do auth.uid() no banco — nunca do payload.
+  const { data, error } = await supabase.rpc('criar_cliente', {
+    p_nome: normalizarTexto(dados.nome, true),
+    p_telefone: normalizarTexto(dados.telefone, true),
+    p_email: normalizarTextoOpcional(dados.email),
+    p_observacoes: normalizarTextoOpcional(dados.observacoes),
+    p_ativo: Boolean(dados.ativo),
+  });
 
   if (error) throw error;
   return data;
@@ -126,6 +117,20 @@ export function mensagemErroCliente(erro) {
 
   if (erro?.code === '42501' || mensagem.includes('permission denied') || mensagem.includes('row-level security')) {
     return 'Sem permissão para realizar esta operação. Verifique se você é um administrador ativo desta barbearia.';
+  }
+
+  // Erros de validação/regra da RPC public.criar_cliente (server-side).
+  if (mensagem.includes('nome do cliente é obrigatório')) {
+    return 'O nome do cliente é obrigatório.';
+  }
+  if (mensagem.includes('telefone do cliente é obrigatório')) {
+    return 'O telefone do cliente é obrigatório.';
+  }
+  if (mensagem.includes('e-mail inválido')) {
+    return 'Informe um e-mail válido.';
+  }
+  if (mensagem.includes('somente um profissional ativo da barbearia')) {
+    return 'Somente um profissional ativo da barbearia pode cadastrar ou listar clientes.';
   }
 
   // Violação do CHECK de e-mail (chk_clientes_email).

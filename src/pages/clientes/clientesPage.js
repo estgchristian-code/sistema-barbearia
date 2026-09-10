@@ -12,7 +12,8 @@ import { toastSucesso } from '../../components/toast.js';
 
 export async function renderizarClientes(conteudo, contexto) {
   const { profissional } = contexto;
-  const somenteLeitura = profissional?.cargo !== 'admin';
+  const permiteCriar = profissional?.cargo === 'admin' || profissional?.cargo === 'barbeiro';
+  const permiteGerenciar = profissional?.cargo === 'admin';
 
   conteudo.innerHTML = '';
 
@@ -22,19 +23,23 @@ export async function renderizarClientes(conteudo, contexto) {
       criarElemento('p', { text: 'Cadastre e gerencie os clientes da barbearia.' }),
     ]),
     criarElemento('div', { class: 'page-header-acoes' }, [
-      somenteLeitura
-        ? null
-        : criarElemento('button', {
+      permiteCriar
+        ? criarElemento('button', {
             type: 'button',
             class: 'btn btn-primary',
             id: 'btn-novo-cliente',
             text: '+ Novo cliente',
-          }),
+          })
+        : null,
     ]),
   ]);
   conteudo.append(cabecalho);
 
-  if (somenteLeitura) {
+  if (profissional?.cargo === 'barbeiro') {
+    conteudo.append(
+      criarElemento('p', { class: 'alert alert-info', text: 'Você pode cadastrar novos clientes. Somente administradores podem editar ou ativar/desativar clientes.' })
+    );
+  } else if (!permiteGerenciar) {
     conteudo.append(
       criarElemento('p', { class: 'alert alert-info', text: 'Somente administradores podem cadastrar, editar ou ativar/desativar clientes.' })
     );
@@ -61,16 +66,18 @@ export async function renderizarClientes(conteudo, contexto) {
   if (btnNovo) {
     btnNovo.addEventListener('click', () => {
       abrirFormularioModal({
-        aposSalvar: () => carregarClientes(lista, { somenteLeitura, filtro: '' }),
+        aposSalvar: () => carregarClientes(lista, { permiteGerenciar, filtro: '' }),
+        // Barbeiro cadastra sempre como ativo (não tem poder administrativo).
+        mostrarAtivo: permiteGerenciar,
       });
     });
   }
 
-  let todosClientes = await carregarClientes(lista, { somenteLeitura, filtro: '' });
+  let todosClientes = await carregarClientes(lista, { permiteGerenciar, filtro: '' });
 
   const campoBusca = conteudo.querySelector('#busca-clientes');
   campoBusca.addEventListener('input', () => {
-    todosClientes = carregarClientes(lista, { somenteLeitura, filtro: campoBusca.value.trim() });
+    todosClientes = carregarClientes(lista, { permiteGerenciar, filtro: campoBusca.value.trim() });
   });
 }
 
@@ -85,7 +92,7 @@ function montarFiltrados(clientes, filtro) {
   );
 }
 
-async function carregarClientes(lista, { somenteLeitura, filtro }) {
+async function carregarClientes(lista, { permiteGerenciar, filtro }) {
   lista.innerHTML = '';
   lista.append(criarEstado('Carregando clientes…'));
 
@@ -135,7 +142,7 @@ async function carregarClientes(lista, { somenteLeitura, filtro }) {
         criarElemento('td', { 'data-label': 'Observações', text: cliente.observacoes || '—' }),
         criarElemento('td', { 'data-label': 'Status' }, [criarBadgeStatus(cliente.ativo)]),
         criarElemento('td', { class: 'acoes', 'data-label': 'Ações' }, [
-          criarElemento('div', { class: 'acao-cel' }, montarAcoes(cliente, { somenteLeitura })),
+          criarElemento('div', { class: 'acao-cel' }, montarAcoes(cliente, { permiteGerenciar })),
         ]),
       ])
     );
@@ -150,7 +157,7 @@ async function carregarClientes(lista, { somenteLeitura, filtro }) {
       if (cliente) {
         abrirFormularioModal({
           cliente,
-          aposSalvar: () => carregarClientes(lista, { somenteLeitura, filtro: '' }),
+          aposSalvar: () => carregarClientes(lista, { permiteGerenciar, filtro: '' }),
         });
       }
     });
@@ -163,7 +170,7 @@ async function carregarClientes(lista, { somenteLeitura, filtro }) {
       alvo.disabled = true;
       try {
         await alterarAtivoCliente(id, novoAtivo);
-        await carregarClientes(lista, { somenteLeitura, filtro });
+        await carregarClientes(lista, { permiteGerenciar, filtro });
       } catch (erro) {
         alvo.disabled = false;
         avisarErro(lista, mensagemErroCliente(erro));
@@ -174,8 +181,9 @@ async function carregarClientes(lista, { somenteLeitura, filtro }) {
   return clientes;
 }
 
-function montarAcoes(cliente, { somenteLeitura }) {
-  if (somenteLeitura) return [criarElemento('span', { text: '—' })];
+function montarAcoes(cliente, { permiteGerenciar }) {
+  // Barbeiro NÃO edita nem ativa/desativa clientes (somente cadastra).
+  if (!permiteGerenciar) return [criarElemento('span', { text: '—' })];
   const toggle = criarElemento('button', {
     type: 'button',
     class: 'btn btn-ghost btn-sm',
@@ -201,7 +209,7 @@ function criarBadgeStatus(ativo) {
 
 // ------------------------- Formulário (cadastro/edição) em modal -------------------------
 
-function abrirFormularioModal({ cliente = null, aposSalvar }) {
+function abrirFormularioModal({ cliente = null, aposSalvar, mostrarAtivo = true }) {
   const ehEdicao = Boolean(cliente);
   const msgErro = criarMensagem('danger');
 
@@ -236,18 +244,26 @@ function abrirFormularioModal({ cliente = null, aposSalvar }) {
   const inputAtivo = criarElemento('input', { type: 'checkbox', name: 'ativo' });
   if (cliente ? cliente.ativo : true) inputAtivo.setAttribute('checked', '');
 
-  const form = criarElemento('form', { id: 'form-cliente' }, [
+  const itensForm = [
     criarCampoFormulario('Nome *', inputNome),
     criarElemento('div', { class: 'form-grid' }, [
       criarCampoFormulario('Telefone *', inputTelefone),
       criarCampoFormulario('E-mail', inputEmail),
     ]),
     criarCampoFormulario('Observações', areaObservacoes),
-    criarElemento('label', { class: 'form-linha' }, [
-      inputAtivo,
-      criarElemento('span', { text: 'Ativo' }),
-    ]),
-  ]);
+  ];
+  // Barbeiro cadastra sempre como ativo (sem poder administrativo): o
+  // campo só aparece para quem pode gerenciar (admin).
+  if (mostrarAtivo) {
+    itensForm.push(
+      criarElemento('label', { class: 'form-linha' }, [
+        inputAtivo,
+        criarElemento('span', { text: 'Ativo' }),
+      ])
+    );
+  }
+
+  const form = criarElemento('form', { id: 'form-cliente' }, itensForm);
   form.append(msgErro);
 
   const btnCancelar = criarElemento('button', { type: 'button', class: 'btn btn-secondary', text: 'Cancelar' });
@@ -272,7 +288,8 @@ function abrirFormularioModal({ cliente = null, aposSalvar }) {
       telefone: inputTelefone.value.trim(),
       email: inputEmail.value.trim(),
       observacoes: areaObservacoes.value.trim(),
-      ativo: inputAtivo.checked,
+      // Barbeiro (sem o campo no form) é sempre ativo; o servidor reforça.
+      ativo: mostrarAtivo ? inputAtivo.checked : true,
     };
 
     const erroValidacao = validarDados(dados);
