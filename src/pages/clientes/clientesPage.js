@@ -36,16 +36,6 @@ export async function renderizarClientes(conteudo, contexto) {
   ]);
   conteudo.append(cabecalho);
 
-  if (profissional?.cargo === 'barbeiro') {
-    conteudo.append(
-      criarElemento('p', { class: 'alert alert-info', text: 'Você pode cadastrar e editar clientes. Somente administradores podem ativar/desativar clientes.' })
-    );
-  } else if (!permiteGerenciar) {
-    conteudo.append(
-      criarElemento('p', { class: 'alert alert-info', text: 'Somente administradores podem cadastrar, editar ou ativar/desativar clientes.' })
-    );
-  }
-
   // Caixa de busca (nome, telefone ou e-mail).
   const busca = criarElemento('div', { class: 'page-tools' }, [
     criarElemento('input', {
