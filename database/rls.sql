@@ -474,6 +474,115 @@ END;
 $$;
 
 -- ------------------------------------------------------------------
+-- 9.4.B BARBEIRO — criar agendamento (SOMENTE para si mesmo)
+-- ------------------------------------------------------------------
+-- Extensão do fluxo 9.4: o barbeiro pode criar manualmente um agendamento
+-- no painel, mas APENAS para si mesmo e dentro da própria barbearia. Por
+-- isso esta RPC:
+--   1. NÃO aceita p_barbeiro_id nem p_barbearia_id: ambos são derivados
+--      do token JWT (auth.uid()) via professional_autenticado_id() e
+--      barbearia_profissional_autenticado() — o barbeiro NUNCA consegue
+--      criar para outro profissional;
+--   2. exige cargo 'barbeiro' ativo (usuario_e_barbeiro_autenticado());
+--      o admin continua usando admin_criar_agendamento;
+--   3. força status inicial 'pendente' (mesma regra do admin);
+--   4. valida explicitamente cliente e serviço ATIVOS da própria
+--      barbearia (as FKs compostas reforçam, mas o erro fica amigável);
+--   5. insere SEMPRE com barbeiro_id/barbearia_id internos (nunca do
+--      cliente).
+-- As autoridades já existentes continuam valendo no INSERT (nada é
+-- desligado):
+--   * M1 (trg_agendamentos_derivar_duracao) deriva data_hora_fim do
+--     serviço;
+--   * A1/M1 (trg_agendamentos_validar_bloqueios) valida horário/bloqueio;
+--   * ux_agendamentos_sem_conflito impede sobreposição do MESMO barbeiro.
+-- Continua SEM policy/GRANT de INSERT direto em agendamentos.
+CREATE OR REPLACE FUNCTION public.barbeiro_criar_agendamento(
+  p_servico_id bigint,
+  p_cliente_id bigint,
+  p_data_hora_inicio timestamp with time zone,
+  p_observacoes text DEFAULT NULL
+)
+RETURNS public.agendamentos
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_barbeiro   bigint;
+  v_barbearia  bigint;
+  v_agendamento public.agendamentos;
+BEGIN
+  v_barbeiro  := public.profissional_autenticado_id();
+  v_barbearia := public.barbearia_profissional_autenticado();
+
+  IF v_barbeiro IS NULL OR NOT public.usuario_e_barbeiro_autenticado() THEN
+    RAISE EXCEPTION 'somente um barbeiro ativo pode criar agendamentos';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.clientes c
+     WHERE c.id = p_cliente_id
+       AND c.barbearia_id = v_barbearia
+       AND c.ativo = true
+  ) THEN
+    RAISE EXCEPTION 'cliente inválido ou de outra barbearia';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.servicos s
+     WHERE s.id = p_servico_id
+       AND s.barbearia_id = v_barbearia
+       AND s.ativo = true
+  ) THEN
+    RAISE EXCEPTION 'serviço inválido ou de outra barbearia';
+  END IF;
+
+  -- data_hora_fim é DERIVADO pela M1; o placeholder abaixo é sobrescrito.
+  INSERT INTO public.agendamentos (
+    barbearia_id, cliente_id, barbeiro_id, servico_id,
+    data_hora_inicio, data_hora_fim, status, observacoes
+  ) VALUES (
+    v_barbearia, p_cliente_id, v_barbeiro, p_servico_id,
+    p_data_hora_inicio, p_data_hora_inicio + interval '1 minute',
+    'pendente', p_observacoes
+  )
+  RETURNING * INTO v_agendamento;
+
+  RETURN v_agendamento;
+END;
+$$;
+
+-- ------------------------------------------------------------------
+-- 9.4.C BARBEIRO — leitura segura dos clientes para criar agendamento
+-- ------------------------------------------------------------------
+-- Pela policy atual (clientes_select_propria), um barbeiro só enxerga
+-- clientes com quem JÁ tem agendamento — a lista ficaria vazia (ou
+-- incompleta) ao montar o modal de criação. Esta RPC de leitura
+-- (SECURITY DEFINER, sem ampliar policies/RLS) devolve APENAS os campos
+-- necessários (id, nome, telefone, ativo) dos clientes ATIVOS da PRÓPRIA
+-- barbearia do profissional autenticado. Nada além disso é exposto.
+CREATE OR REPLACE FUNCTION public.listar_clientes_para_agendamento()
+RETURNS TABLE (id bigint, nome text, telefone text, ativo boolean)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF public.profissional_autenticado_id() IS NULL THEN
+    RAISE EXCEPTION 'somente um profissional ativo da barbearia pode listar clientes';
+  END IF;
+
+  RETURN QUERY
+    SELECT c.id, c.nome, c.telefone, c.ativo
+      FROM public.clientes c
+     WHERE c.barbearia_id = public.barbearia_profissional_autenticado()
+       AND c.ativo = true
+     ORDER BY c.nome;
+END;
+$$;
+
+-- ------------------------------------------------------------------
 -- 9.5 AUTORIDADE DE BLOQUEIOS E HORÁRIO (server-side, elimina corrida)
 -- ------------------------------------------------------------------
 -- Garante, NO BANCO, que um agendamento nunca seja confirmado em intervalo
@@ -674,11 +783,15 @@ REVOKE ALL ON FUNCTION public.admin_atualizar_agendamento(bigint, bigint, bigint
 REVOKE ALL ON FUNCTION public.admin_criar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.admin_excluir_agendamento(bigint) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.barbeiro_atualizar_status(bigint, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.barbeiro_criar_agendamento(bigint, bigint, timestamp with time zone, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.listar_clientes_para_agendamento() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.transicao_status_valida(text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_atualizar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_criar_agendamento(bigint, bigint, bigint, bigint, timestamp with time zone, timestamp with time zone, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_excluir_agendamento(bigint) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.barbeiro_atualizar_status(bigint, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.barbeiro_criar_agendamento(bigint, bigint, timestamp with time zone, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.listar_clientes_para_agendamento() TO authenticated;
 
 -- =====================================================================
 -- 10. POLICIES — horarios_funcionamento e bloqueios_agenda

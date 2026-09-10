@@ -2,6 +2,7 @@ import {
   listarAgendamentosDoDia,
   obterDadosSuporteAgenda,
   criarAgendamento,
+  criarAgendamentoBarbeiro,
   atualizarAgendamento,
   excluirAgendamento,
   barbeiroAtualizarStatus,
@@ -70,16 +71,14 @@ export async function renderizarAgenda(conteudo, contexto) {
       criarElemento('p', { text: 'Acompanhe e gerencie os agendamentos do dia.' }),
     ]),
     criarElemento('div', { class: 'page-header-acoes' }, [
-      ehAdmin
-        ? criarElemento('button', { type: 'button', class: 'btn btn-primary', id: 'btn-novo-agendamento', text: '+ Novo agendamento' })
-        : null,
+      criarElemento('button', { type: 'button', class: 'btn btn-primary', id: 'btn-novo-agendamento', text: '+ Novo agendamento' }),
     ]),
   ]);
   conteudo.append(topo);
 
   if (!ehAdmin) {
     conteudo.append(
-      criarElemento('p', { class: 'alert alert-info', text: 'Você pode visualizar seus agendamentos e alterar o status deles.' })
+      criarElemento('p', { class: 'alert alert-info', text: 'Você pode visualizar seus agendamentos, criar novos para você e alterar o status deles.' })
     );
   }
 
@@ -150,7 +149,7 @@ export async function renderizarAgenda(conteudo, contexto) {
         criarElemento('div', { class: 'empty-state' }, [
           criarElemento('span', { class: 'empty-state-icone', 'aria-hidden': 'true', text: '📅' }),
           criarElemento('h3', { class: 'empty-state-titulo', text: 'Nenhum agendamento neste dia' }),
-          criarElemento('p', { text: ehAdmin ? 'Clique em "+ Novo agendamento" para criar.' : 'Nenhum agendamento para exibir.' }),
+          criarElemento('p', { text: 'Clique em "+ Novo agendamento" para criar.' }),
         ])
       );
       return;
@@ -165,6 +164,7 @@ export async function renderizarAgenda(conteudo, contexto) {
     abrirModalAgendamento({
       agendamento,
       suporte,
+      ehAdmin: true,
       aoSalvar: (dados) => atualizarAgendamento(agendamento.id, dados),
       aoFechar: atualizarLista,
     });
@@ -269,7 +269,9 @@ export async function renderizarAgenda(conteudo, contexto) {
         agendamento: null,
         suporte,
         dataPadrao: dataSelecionada,
-        aoSalvar: criarAgendamento,
+        ehAdmin,
+        idBarbeiroLogado,
+        aoSalvar: ehAdmin ? criarAgendamento : criarAgendamentoBarbeiro,
         aoFechar: atualizarLista,
       });
     });
@@ -406,7 +408,7 @@ function montarCartaoBloqueio(b, profissionais) {
 
 // ------------------------- Modal de criação/edição -------------------------
 
-function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalvar, aoFechar }) {
+function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalvar, aoFechar, ehAdmin = true, idBarbeiroLogado = null }) {
   const ehEdicao = Boolean(agendamento);
 
   // Cliente
@@ -416,12 +418,16 @@ function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalv
     selCliente.append(criarElemento('option', { value: String(c.id), text: c.nome }));
   }
 
-  // Barbeiro — somente profissionais com cargo 'barbeiro' e ativo podem
-  // receber novos agendamentos. Admins (ex.: Christian) não aparecem aqui.
-  const selBarbeiro = criarElemento('select', { name: 'barbeiro_id', class: 'input', required: true });
-  selBarbeiro.append(criarElemento('option', { value: '', text: 'Selecione o barbeiro…', disabled: true, selected: true }));
-  for (const p of suporte.profissionais.filter((x) => x.cargo === 'barbeiro' && x.ativo)) {
-    selBarbeiro.append(criarElemento('option', { value: String(p.id), text: p.nome }));
+  // Barbeiro — somente no fluxo do admin. O barbeiro NUNCA escolhe o
+  // profissional: ao criar, o banco deriva barbeiro_id/barbearia_id do seu
+  // token (auth.uid()); no frontend usamos o id do próprio logado (validation).
+  let selBarbeiro = null;
+  if (ehAdmin) {
+    selBarbeiro = criarElemento('select', { name: 'barbeiro_id', class: 'input', required: true });
+    selBarbeiro.append(criarElemento('option', { value: '', text: 'Selecione o barbeiro…', disabled: true, selected: true }));
+    for (const p of suporte.profissionais.filter((x) => x.cargo === 'barbeiro' && x.ativo)) {
+      selBarbeiro.append(criarElemento('option', { value: String(p.id), text: p.nome }));
+    }
   }
 
   // Serviço
@@ -463,7 +469,7 @@ function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalv
 
   const form = criarElemento('form', { id: 'form-agendamento' }, [
     criarCampoFormulario('Cliente *', selCliente),
-    criarCampoFormulario('Barbeiro *', selBarbeiro),
+    ehAdmin ? criarCampoFormulario('Barbeiro *', selBarbeiro) : null,
     criarCampoFormulario('Serviço *', selServico),
     criarElemento('div', { class: 'form-grid' }, [
       criarCampoFormulario('Data *', inputData),
@@ -494,7 +500,7 @@ function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalv
   // Pré-preencher na edição.
   if (ehEdicao) {
     selCliente.value = String(agendamento.cliente_id);
-    selBarbeiro.value = String(agendamento.barbeiro_id);
+    if (selBarbeiro) selBarbeiro.value = String(agendamento.barbeiro_id);
     selServico.value = String(agendamento.servico_id);
     inputData.value = formatarDataInput(new Date(agendamento.data_hora_inicio));
     inputHora.value = formatarHora(new Date(agendamento.data_hora_inicio));
@@ -521,7 +527,7 @@ function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalv
     // Validação de disponibilidade (dia fechado, fora do horário, bloqueio,
     // passado). Na edição, registros históricos não são bloqueados pela regra
     // de passado (ehNovo = false), mantendo registros existentes editáveis.
-    const barbeiroId = Number(selBarbeiro.value) || null;
+    const barbeiroId = ehAdmin ? (Number(selBarbeiro.value) || null) : idBarbeiroLogado;
     const resultado = await verificarDisponibilidade({
       inicio,
       fim,
@@ -535,7 +541,7 @@ function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalv
   }
 
   selServico.addEventListener('change', atualizarFormulario);
-  selBarbeiro.addEventListener('change', atualizarFormulario);
+  if (selBarbeiro) selBarbeiro.addEventListener('change', atualizarFormulario);
   inputHora.addEventListener('change', atualizarFormulario);
   inputData.addEventListener('change', atualizarFormulario);
   atualizarFormulario();
@@ -586,7 +592,7 @@ function abrirModalAgendamento({ agendamento = null, suporte, dataPadrao, aoSalv
 
     return {
       cliente_id: Number(selCliente.value),
-      barbeiro_id: Number(selBarbeiro.value),
+      barbeiro_id: ehAdmin ? Number(selBarbeiro.value) : idBarbeiroLogado,
       servico_id: Number(selServico.value),
       data_hora_inicio: inicio,
       data_hora_fim: fim,

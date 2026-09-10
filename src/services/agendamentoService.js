@@ -52,15 +52,25 @@ export async function listarAgendamentosDoDia(data) {
 
 // Dados de suporte dos formulários: clientes, serviços e profissionais ATIVOS
 // da própria barbearia. Nenhuma lista fixa em JavaScript.
+// A lista de clientes difere por cargo:
+//   * admin  -> SELECT direto em clientes (clientes_select_propria mostra todos);
+//   * barbeiro -> RPC listar_clientes_para_agendamento(): devolve SOMENTE
+//     id/nome/telefone/ativo dos clientes ATIVOS da própria barbearia (o RLS
+//     clientes_select_propria mostraria apenas clientes com agendamento prévio).
 export async function obterDadosSuporteAgenda() {
-  const { barbeariaId } = await obterContexto();
+  const { barbeariaId, cargo } = await obterContexto();
+
+  const consultaClientes =
+    cargo === 'barbeiro'
+      ? supabase.rpc('listar_clientes_para_agendamento')
+      : supabase
+          .from('clientes')
+          .select('id, nome, telefone, ativo')
+          .eq('barbearia_id', barbeariaId)
+          .order('nome', { ascending: true });
 
   const [clientes, servicos, profissionais] = await Promise.all([
-    supabase
-      .from('clientes')
-      .select('id, nome, telefone, ativo')
-      .eq('barbearia_id', barbeariaId)
-      .order('nome', { ascending: true }),
+    consultaClientes,
     supabase
       .from('servicos')
       .select('id, nome, preco, duracao_minutos, ativo')
@@ -102,6 +112,24 @@ export async function criarAgendamento(dados) {
     p_data_hora_inicio: dados.data_hora_inicio.toISOString(),
     p_data_hora_fim: dados.data_hora_fim.toISOString(),
     p_status: null,
+    p_observacoes: dados.observacoes || null,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+// RPC: barbeiro_criar_agendamento. O barbeiro cria agendamento SOMENTE para
+// si mesmo: não há p_barbeiro_id/p_barbearia_id no payload — o banco deriva
+// ambos do auth.uid(). O status é sempre 'pendente' (validado no banco).
+export async function criarAgendamentoBarbeiro(dados) {
+  const erroValidacao = validarDadosAgendamento(dados);
+  if (erroValidacao) throw new Error(erroValidacao);
+
+  const { data, error } = await supabase.rpc('barbeiro_criar_agendamento', {
+    p_servico_id: dados.servico_id,
+    p_cliente_id: dados.cliente_id,
+    p_data_hora_inicio: dados.data_hora_inicio.toISOString(),
     p_observacoes: dados.observacoes || null,
   });
 
@@ -203,7 +231,15 @@ export function mensagemErroAgendamento(erro) {  const msg = (erro?.message || '
   }
 
   if (msg.includes('somente um barbeiro ativo')) {
-    return 'Somente um barbeiro ativo pode alterar o status de seus agendamentos.';
+    return 'Somente um barbeiro ativo pode realizar esta operação.';
+  }
+
+  if (msg.includes('cliente inválido')) {
+    return 'Cliente inválido. Verifique se é ativo e pertence a esta barbearia.';
+  }
+
+  if (msg.includes('serviço inválido')) {
+    return 'Serviço inválido. Verifique se é ativo e pertence a esta barbearia.';
   }
 
   if (msg.includes('não encontrado') || msg.includes('pertence a outra barbearia')) {
