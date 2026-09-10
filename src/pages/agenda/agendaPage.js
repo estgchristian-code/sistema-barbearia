@@ -39,8 +39,8 @@ const STATUS_CLASSE = {
 };
 
 const BADGE_STATUS = {
-  pendente: 'badge-warning',
-  confirmado: 'badge-info',
+  pendente: 'badge-info',
+  confirmado: 'badge-accent',
   concluido: 'badge-success',
   cancelado: 'badge-neutral',
 };
@@ -65,7 +65,7 @@ export async function renderizarAgenda(conteudo, contexto) {
     return;
   }
 
-  const topo = criarElemento('header', { class: 'page-header' }, [
+  const topo = criarElemento('header', { class: 'page-header agenda-header' }, [
     criarElemento('div', {}, [
       criarElemento('h1', { text: 'Agenda' }),
       criarElemento('p', { text: 'Acompanhe e gerencie os agendamentos do dia.' }),
@@ -75,12 +75,6 @@ export async function renderizarAgenda(conteudo, contexto) {
     ]),
   ]);
   conteudo.append(topo);
-
-  if (!ehAdmin) {
-    conteudo.append(
-      criarElemento('p', { class: 'alert alert-info', text: 'Você pode visualizar seus agendamentos, criar novos para você e alterar o status deles.' })
-    );
-  }
 
   // Barra de controle de data + filtro.
   const controles = criarElemento('div', { class: 'agenda-controles' });
@@ -296,7 +290,7 @@ export async function renderizarAgenda(conteudo, contexto) {
 
 const ACOES_POR_STATUS = {
   pendente: [
-    { status: 'confirmado', rotulo: 'Confirmar', variante: 'btn-primary' },
+    { status: 'confirmado', rotulo: 'Confirmar', variante: 'btn-accent' },
     { status: 'cancelado', rotulo: 'Cancelar', variante: 'btn-danger' },
   ],
   confirmado: [
@@ -315,18 +309,13 @@ function montarCartaoAgendamento(a, suporte, { ehAdmin, idBarbeiroLogado, aoEdit
   const cliente = porId(suporte.clientes, a.cliente_id);
   const barbeiro = porId(suporte.profissionais, a.barbeiro_id);
 
-  const linhas = [
+  const corpo = criarElemento('div', { class: 'agenda-card-corpo' }, [
     criarElemento('span', { class: 'agenda-card-cliente', text: cliente?.nome || `Cliente #${a.cliente_id}` }),
     criarElemento('span', { class: 'agenda-card-servico', text: servico?.nome || `Serviço #${a.servico_id}` }),
-  ];
-  if (a.observacoes) {
-    linhas.push(criarElemento('p', { class: 'agenda-card-obs', text: a.observacoes }));
-  }
-
-  const corpo = criarElemento('div', { class: 'agenda-card-corpo' }, linhas);
-
-  const rodape = criarElemento('div', { class: 'agenda-card-rodape' }, [
-    criarElemento('span', { class: 'agenda-card-barbeiro', text: `✂ ${barbeiro?.nome || `#${a.barbeiro_id}`}` }),
+    a.observacoes ? criarElemento('p', { class: 'agenda-card-obs', text: a.observacoes }) : null,
+    criarElemento('div', { class: 'agenda-card-rodape' }, [
+      criarElemento('span', { class: 'agenda-card-barbeiro', text: `✂ ${barbeiro?.nome || `#${a.barbeiro_id}`}` }),
+    ]),
   ]);
 
   const acoes = [];
@@ -366,9 +355,10 @@ function montarCartaoAgendamento(a, suporte, { ehAdmin, idBarbeiroLogado, aoEdit
       criarElemento('span', { class: 'agenda-card-duracao', text: formatarDuracao(servico?.duracao_minutos) }),
     ]),
     corpo,
-    criarElemento('div', { class: 'agenda-card-status', 'data-label': 'Status' }, [criarBadgeStatus(a.status)]),
-    rodape,
-    criarElemento('div', { class: 'agenda-card-acoes' }, acoes),
+    criarElemento('div', { class: 'agenda-card-lado' }, [
+      criarElemento('div', { class: 'agenda-card-status', 'data-label': 'Status' }, [criarBadgeStatus(a.status)]),
+      criarElemento('div', { class: 'agenda-card-acoes' }, acoes),
+    ]),
   ]);
 
   return card;
@@ -665,12 +655,13 @@ function parseDataInput(valor) {
 }
 
 function formatarDataLonga(data) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(data);
+  const nomeDia = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(data);
+  const nomeMes = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(data);
+  return `${capitalizar(nomeDia)}, ${data.getDate()} de ${capitalizar(nomeMes)} de ${data.getFullYear()}`;
+}
+
+function capitalizar(texto) {
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
 function ehHoje(data) {
