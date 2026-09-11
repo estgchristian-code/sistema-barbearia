@@ -162,6 +162,10 @@ export async function excluirProfissional(id, temAcesso) {
 
 // Remove o usuário Auth de um profissional excluído. Retorna null em caso de
 // sucesso ou uma mensagem de erro amigável (a exclusão já foi efetivada).
+// Faz exatamente 1 retry (com pequeno backoff) SOMENTE em erros transitórios
+// (falha de rede, 5xx, 429, 408). Erros definitivos de autorização/validação
+// (4xx sem 429/408) não são repetidos para não gerar loop nem reenviar
+// chamadas que falharão novamente.
 async function removerAcessoProfissional(profissionalId) {
   const { data: sessao, error: sessaoErro } = await supabase.auth.getSession();
   if (sessaoErro || !sessao?.session?.access_token) {
@@ -170,33 +174,59 @@ async function removerAcessoProfissional(profissionalId) {
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const url = `${supabaseUrl}/functions/v1/remover-acesso-profissional`;
+  const opcoes = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${sessao.session.access_token}`,
+    },
+    body: JSON.stringify({ profissional_id: profissionalId }),
+  };
 
-  let resposta;
-  try {
-    resposta = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${sessao.session.access_token}`,
-      },
-      body: JSON.stringify({ profissional_id: profissionalId }),
-    });
-  } catch {
-    return 'Não foi possível contactar o servidor.';
+  const MAX_TENTATIVAS = 2;
+  const BACKOFF_MS = 800;
+
+  let ultimoErro = null;
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+    let resposta;
+    let json;
+    try {
+      resposta = await fetch(url, opcoes);
+    } catch {
+      ultimoErro = 'Não foi possível contactar o servidor.';
+      if (tentativa < MAX_TENTATIVAS) {
+        await new Promise((r) => setTimeout(r, BACKOFF_MS));
+      }
+      continue;
+    }
+
+    try {
+      json = await resposta.json();
+    } catch {
+      ultimoErro = 'Resposta inválida do servidor.';
+      if (tentativa < MAX_TENTATIVAS) {
+        await new Promise((r) => setTimeout(r, BACKOFF_MS));
+      }
+      continue;
+    }
+
+    if (!resposta.ok || json?.ok === false) {
+      const transitorio =
+        resposta.status >= 500 ||
+        resposta.status === 429 ||
+        resposta.status === 408;
+      ultimoErro = json?.message || 'Não foi possível remover o acesso.';
+      if (transitorio && tentativa < MAX_TENTATIVAS) {
+        await new Promise((r) => setTimeout(r, BACKOFF_MS));
+        continue;
+      }
+      break;
+    }
+
+    return null;
   }
 
-  let json;
-  try {
-    json = await resposta.json();
-  } catch {
-    return 'Resposta inválida do servidor.';
-  }
-
-  if (!resposta.ok || json?.ok === false) {
-    return json?.message || 'Não foi possível remover o acesso.';
-  }
-
-  return null;
+  return ultimoErro;
 }
 
 // ---------------------------------------------------------------------------

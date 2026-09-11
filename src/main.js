@@ -40,7 +40,7 @@ async function iniciarApp() {
   const {
     obterProfissionalAutenticado,
   } = await import('./services/profissionalService.js');
-  const { observarMudancasDeSessao } = await import('./services/authService.js');
+  const { observarMudancasDeSessao, logout } = await import('./services/authService.js');
   const { renderizarPainelAdmin } = await import('./layout/adminLayout.js');
   const { renderizarLogin } = await import('./pages/auth/loginPage.js');
   const { renderizarDashboard } = await import('./pages/dashboard/dashboardPage.js');
@@ -69,8 +69,10 @@ async function iniciarApp() {
 
   async function entrarNoPainel() {
     const profissional = await obterProfissionalAutenticado();
-    // Profissional excluído (soft delete) retorna null — volta ao login.
+    // Profissional ausente ou excluído (soft delete): limpa a sessão Auth
+    // antes de voltar ao login — evita que token permaneça no localStorage.
     if (!profissional || profissional.deleted_at) {
+      try { await logout(); } catch { /* ignora erro de rede/logout */ }
       mostrarLogin();
       return;
     }
