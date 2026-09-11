@@ -188,12 +188,17 @@ DROP POLICY IF EXISTS "barbearias_update_admin"            ON public.barbearias;
 
 DROP POLICY IF EXISTS "profissionais_select_propria"       ON public.profissionais;
 DROP POLICY IF EXISTS "profissionais_write_admin"          ON public.profissionais;
+DROP POLICY IF EXISTS "profissionais_insert_admin"         ON public.profissionais;
+DROP POLICY IF EXISTS "profissionais_update_admin"         ON public.profissionais;
 
 DROP POLICY IF EXISTS "servicos_select_propria"            ON public.servicos;
 DROP POLICY IF EXISTS "servicos_write_admin"               ON public.servicos;
+DROP POLICY IF EXISTS "servicos_insert_admin"              ON public.servicos;
+DROP POLICY IF EXISTS "servicos_update_admin"              ON public.servicos;
 
 DROP POLICY IF EXISTS "clientes_select_propria"            ON public.clientes;
 DROP POLICY IF EXISTS "clientes_write_admin"               ON public.clientes;
+DROP POLICY IF EXISTS "clientes_update_admin"              ON public.clientes;
 
 DROP POLICY IF EXISTS "agendamentos_select_propria"        ON public.agendamentos;
 DROP POLICY IF EXISTS "agendamentos_insert_admin"          ON public.agendamentos;
@@ -229,9 +234,17 @@ CREATE POLICY "profissionais_select_propria"
   FOR SELECT TO authenticated
   USING (public.usuario_pertence_a_barbearia(barbearia_id));
 
-CREATE POLICY "profissionais_write_admin"
+-- Escrita do admin: SOMENTE INSERT e UPDATE. NÃO existe policy de DELETE:
+-- a exclusão de profissional é exclusiva da RPC admin_excluir_profissional
+-- (soft delete via deleted_at/ativo) e o RLS nega DELETE por padrão.
+CREATE POLICY "profissionais_insert_admin"
   ON public.profissionais
-  FOR ALL TO authenticated
+  FOR INSERT TO authenticated
+  WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
+
+CREATE POLICY "profissionais_update_admin"
+  ON public.profissionais
+  FOR UPDATE TO authenticated
   USING (public.usuario_e_admin_da_barbearia(barbearia_id))
   WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
 
@@ -243,9 +256,15 @@ CREATE POLICY "servicos_select_propria"
   FOR SELECT TO authenticated
   USING (public.usuario_pertence_a_barbearia(barbearia_id));
 
-CREATE POLICY "servicos_write_admin"
+-- Escrita do admin: SOMENTE INSERT e UPDATE (sem DELETE).
+CREATE POLICY "servicos_insert_admin"
   ON public.servicos
-  FOR ALL TO authenticated
+  FOR INSERT TO authenticated
+  WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
+
+CREATE POLICY "servicos_update_admin"
+  ON public.servicos
+  FOR UPDATE TO authenticated
   USING (public.usuario_e_admin_da_barbearia(barbearia_id))
   WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
 
@@ -267,9 +286,12 @@ CREATE POLICY "clientes_select_propria"
     )
   );
 
-CREATE POLICY "clientes_write_admin"
+-- Escrita do admin: SOMENTE UPDATE (sem INSERT — criação é via RPC
+-- criar_cliente; sem DELETE — não existe exclusão física no produto, o
+-- cliente é desativado via UPDATE ativo = false).
+CREATE POLICY "clientes_update_admin"
   ON public.clientes
-  FOR ALL TO authenticated
+  FOR UPDATE TO authenticated
   USING (public.usuario_e_admin_da_barbearia(barbearia_id))
   WITH CHECK (public.usuario_e_admin_da_barbearia(barbearia_id));
 
@@ -793,7 +815,7 @@ $$;
 -- ------------------------------------------------------------------
 -- Regra aprovada:
 --   * ADMIN   : cria, edita e ativa/desativa clientes (INALTERADO — segue
---     pelo UPDATE direto via policy clientes_write_admin).
+--     pelo UPDATE direto via policy clientes_update_admin).
 --   * BARBEIRO: cria (RPC 9.4.D) e EDITA APENAS nome, telefone, e-mail e
 --     observações de clientes da PRÓPRIA barbearia; NÃO ativa/desativa.
 --
@@ -1142,18 +1164,23 @@ GRANT SELECT ON public.barbearias, public.profissionais, public.servicos,
 
 -- Escrita nas demais tabelas (fora de agendamentos e fora da CRIAÇÃO de
 -- clientes):
---   * profissionais/servicos/horarios/bloqueios: admin usa
---     (linhas restritas por RLS via usuario_e_admin_da_barbearia).
---   * clientes: SEM INSERT direto — a criação (admin OU barbeiro) passa
---     SOMENTE pela RPC public.criar_cliente (seção 9.4.D). UPDATE e DELETE
---     continuam com o admin via policy clientes_write_admin.
+--   * profissionais/servicos: admin usa INSERT/UPDATE (linhas restritas por
+--     RLS via políticas explícitas profissionais_*_admin / servicos_*_admin).
+--     SEM DELETE: a exclusão é SOMENTE via RPC admin_excluir_profissional
+--     (soft delete preserva o histórico).
+--   * clientes: SEM INSERT direto (a criação — admin OU barbeiro — passa
+--     SOMENTE pela RPC public.criar_cliente). UPDATE apenas para o admin via
+--     policy clientes_update_admin; SEM DELETE (não existe exclusão física,
+--     cliente é desativado via UPDATE ativo = false).
 --   * barbearias: admin edita a própria (UPDATE); ninguém cria/exclui
 --     barbearia pela API.
 --   * agendamentos: NÃO ENTRA AQUI (fica sem INSERT/UPDATE/DELETE para
 --     não dar ao barbeiro um caminho de escrita de qualquer coluna).
-GRANT INSERT, UPDATE, DELETE ON public.profissionais, public.servicos,
-  public.horarios_funcionamento, public.bloqueios_agenda TO authenticated;
-GRANT UPDATE, DELETE ON public.clientes TO authenticated;
+--   * horarios_funcionamento e bloqueios_agenda: mantêm INSERT/UPDATE/DELETE
+--     (a UI os gerencia diretamente — ex.: excluir um bloqueio da agenda).
+GRANT INSERT, UPDATE ON public.profissionais, public.servicos TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.horarios_funcionamento, public.bloqueios_agenda TO authenticated;
+GRANT UPDATE ON public.clientes TO authenticated;
 GRANT UPDATE ON public.barbearias TO authenticated;
 
 -- =====================================================================
