@@ -117,6 +117,17 @@ function diaSemanaLocal(tz: string, d: Date): number {
   return mapa[weekday] ?? 0;
 }
 
+// Devolve a data local (YYYY-MM-DD) do instante naquele fuso. Usada no
+// anti-abuso para comparar o "mesmo dia" da barbearia sem depender de UTC.
+function dataLocal(tz: string, d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
 // ---------------------------------------------------------------------------
 // Validação de entrada
 // ---------------------------------------------------------------------------
@@ -134,6 +145,17 @@ interface Entrada {
 function validarTelefone(t: string): boolean {
   // Aceita dígitos e espaços/traços/parenteses com pelo menos 8 dígitos.
   return /^[\d\s()+-]{8,20}$/.test(t) && /\d{8,}/.test(t);
+}
+
+// Normaliza telefone para dígitos apenas, mantendo o DDD (fixo com 10,
+// celular com 11). Remove o código do país "55" e toda formatação, para que
+// variações como "(41) 90000-0011" e "+55 41 90000-0011" caiam no mesmo
+// número — sem clientes duplicados nem burla dos limites por telefone.
+function normalizarTelefone(t: string): string {
+  let d = t.replace(/\D/g, "");
+  if (d.length > 11 && d.startsWith("55")) d = d.slice(2);
+  if (d.length > 11) d = d.slice(d.length - 11);
+  return d;
 }
 
 function validarEmail(e: string): boolean {
@@ -370,15 +392,46 @@ async function criarAgendamentoPublico(entrada: Entrada, inicio: Date) {
       throw negocio(422, "Este horário está bloqueado para este barbeiro.");
     }
 
+    // 7b) Anti-abuso (combinação mínima): no máximo UM agendamento pendente
+    // por telefone por dia, contado no fuso da barbearia. A rejeição acontece
+    // ANTES de criar o cliente (evita poluir a base em tentativas de spam) e
+    // é serializada pelo MESMO advisory lock que o trigger
+    // trg_agendamentos_validar_bloqueios usa, impedindo a corrida entre duas
+    // requisições simultâneas do mesmo telefone no mesmo dia.
+    const telefoneCanonico = normalizarTelefone(entrada.cliente_telefone);
+    await tx`
+      select pg_advisory_xact_lock(
+        hashtextextended('barbearia_agenda:' || ${barbeariaId}::text, 0)
+      )
+    `;
+    const pendentes = await tx`
+      select a.id
+      from public.agendamentos a
+      join public.clientes c on c.id = a.cliente_id
+      where a.barbearia_id = ${barbeariaId}
+        and c.barbearia_id = ${barbeariaId}
+        and regexp_replace(c.telefone, '[^0-9]', '', 'g') = ${telefoneCanonico}
+        and a.status = 'pendente'
+        and (a.data_hora_inicio at time zone ${BARBEARIA_TIMEZONE})::date = ${dataLocal(BARBEARIA_TIMEZONE, inicio)}
+      limit 1
+    `;
+    if (pendentes.length > 0) {
+      throw negocio(
+        409,
+        "Você já possui um agendamento pendente nesta data. Verifique o status ou escolha outro dia."
+      );
+    }
+
     // 8) Cliente: reutilizar se existir (por telefone na mesma barbearia; ou
     // por e-mail se informado) — senão criar. Qualquer vínculo é SEMPRE da
-    // própria barbearia.
-    const telefoneNorm = entrada.cliente_telefone.trim();
+    // própria barbearia. O telefone é comparado/armazenado em formato
+    // CANÔNICO (apenas dígitos): "(41) 90000-0011", "+55 41 90000-0011"
+    // e "41900000011" caem no mesmo cliente existente.
     let cliente;
     const porTelefone = await tx`
       select id from public.clientes
       where barbearia_id = ${barbeariaId}
-        and telefone = ${telefoneNorm}
+        and regexp_replace(telefone, '[^0-9]', '', 'g') = ${telefoneCanonico}
         and ativo = true
       limit 1
     `;
@@ -400,7 +453,7 @@ async function criarAgendamentoPublico(entrada: Entrada, inicio: Date) {
         insert into public.clientes
           (barbearia_id, nome, telefone, email, ativo)
         values
-          (${barbeariaId}, ${entrada.cliente_nome}, ${telefoneNorm}, ${entrada.cliente_email ?? null}, true)
+          (${barbeariaId}, ${entrada.cliente_nome}, ${telefoneCanonico}, ${entrada.cliente_email ?? null}, true)
         returning id, nome
       `;
       cliente = criado[0];
@@ -408,9 +461,10 @@ async function criarAgendamentoPublico(entrada: Entrada, inicio: Date) {
 
     // 9) INSERT — a constraint ux_agendamentos_sem_conflito é a autoridade
     // final contra agendamentos sobrepostos do mesmo barbeiro (23P01 -> 409).
-    // ATENÇÃO: isso NÃO é idempotência completa. Uma chave formal de
-    // idempotência (para reenvio da MESMA requisição) ainda NÃO foi
-    // implementada e poderá ser adicionada futuramente, se necessário.
+    // Combinado com o limite anti-abuso do passo 7, o reenvio da MESMA
+    // requisição (mesmo telefone/dia) passa a ser barrado por 409 — o que
+    // funciona como idempotência natural, sem exigir chave de idempotência
+    // formal.
     const agendados = await tx`
       insert into public.agendamentos
         (barbearia_id, cliente_id, barbeiro_id, servico_id, data_hora_inicio, data_hora_fim, status, observacoes)
