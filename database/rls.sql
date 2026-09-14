@@ -746,11 +746,14 @@ BEGIN
     p_ativo := true;
   END IF;
 
+  -- Normalizar telefone (somente dígitos) antes de gravar (M011).
+  p_telefone := public.normalizar_telefone(p_telefone);
+
   -- Validação server-side mínima (réplica das regras do painel/da tabela).
   IF trim(coalesce(p_nome, '')) = '' THEN
     RAISE EXCEPTION 'nome do cliente é obrigatório';
   END IF;
-  IF trim(coalesce(p_telefone, '')) = '' THEN
+  IF p_telefone IS NULL OR p_telefone = '' THEN
     RAISE EXCEPTION 'telefone do cliente é obrigatório';
   END IF;
   IF p_email IS NOT NULL AND p_email !~* '^[^@\s]+@[^@\s]+$' THEN
@@ -761,7 +764,7 @@ BEGIN
   VALUES (
     v_barbearia,
     trim(p_nome),
-    trim(p_telefone),
+    p_telefone,
     nullif(trim(coalesce(p_email, '')), ''),
     nullif(trim(coalesce(p_observacoes, '')), ''),
     p_ativo
@@ -860,10 +863,13 @@ BEGIN
     RAISE EXCEPTION 'somente um profissional ativo da barbearia pode editar clientes';
   END IF;
 
+  -- Normalizar telefone (somente dígitos) antes de gravar (M011).
+  p_telefone := public.normalizar_telefone(p_telefone);
+
   IF trim(coalesce(p_nome, '')) = '' THEN
     RAISE EXCEPTION 'nome do cliente é obrigatório';
   END IF;
-  IF trim(coalesce(p_telefone, '')) = '' THEN
+  IF p_telefone IS NULL OR p_telefone = '' THEN
     RAISE EXCEPTION 'telefone do cliente é obrigatório';
   END IF;
   IF p_email IS NOT NULL AND p_email !~* '^[^@\s]+@[^@\s]+$' THEN
@@ -872,7 +878,7 @@ BEGIN
 
   UPDATE public.clientes
      SET nome        = trim(p_nome),
-         telefone    = trim(p_telefone),
+         telefone    = p_telefone,
          email       = nullif(trim(coalesce(p_email, '')), ''),
          observacoes = nullif(trim(coalesce(p_observacoes, '')), '')
    WHERE id = p_cliente_id
@@ -886,6 +892,66 @@ BEGIN
   RETURN v_cliente;
 END;
 $$;
+
+-- ------------------------------------------------------------------
+-- 9.4.G NORMALIZAÇÃO DE TELEFONE em clientes (M011)
+-- ------------------------------------------------------------------
+-- Garante, NO BANCO, que todo telefone armazenado em public.clientes
+-- fique em formato canônico (somente dígitos). Cobre todas as vias de
+-- escrita:
+--   * RPC público criar-agendamento (grava canônico, já normaliza);
+--   * RPC criar_cliente / editar_cliente (M006/M007, normalizam também);
+--   * UPDATE direto do admin via policy clientes_update_admin.
+-- O trigger é a ÚLTIMA barreira de consistência (BEFORE INSERT/UPDATE).
+-- NÃO cria UNIQUE: dados legados podem conter duplicatas e telefone pode
+-- ser compartilhado (família).
+CREATE OR REPLACE FUNCTION public.normalizar_telefone(p_telefone text)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = ''
+AS $$
+DECLARE
+  v_d text;
+BEGIN
+  IF p_telefone IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  v_d := regexp_replace(p_telefone, '[^0-9]', '', 'g');
+
+  IF length(v_d) > 11 AND v_d LIKE '55%' THEN
+    v_d := right(v_d, length(v_d) - 2);
+  END IF;
+
+  IF length(v_d) > 11 THEN
+    v_d := right(v_d, 11);
+  END IF;
+
+  RETURN v_d;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.normalizar_telefone_clientes()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  NEW.telefone := public.normalizar_telefone(NEW.telefone);
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_clientes_normalizar_telefone ON public.clientes;
+CREATE TRIGGER trg_clientes_normalizar_telefone
+    BEFORE INSERT OR UPDATE OF telefone
+    ON public.clientes
+    FOR EACH ROW EXECUTE FUNCTION public.normalizar_telefone_clientes();
+
+REVOKE ALL ON FUNCTION public.normalizar_telefone(text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.normalizar_telefone_clientes() FROM PUBLIC, anon;
 
 -- ------------------------------------------------------------------
 -- 9.5 AUTORIDADE DE BLOQUEIOS E HORÁRIO (server-side, elimina corrida)

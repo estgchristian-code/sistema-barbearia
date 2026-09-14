@@ -6,6 +6,7 @@ import {
   editarClienteBarbeiro,
   mensagemErroCliente,
   validarTelefoneBrasileiro,
+  normalizarTelefone,
 } from '../../services/clienteService.js';
 import { criarElemento, criarCampoFormulario, criarEstado } from '../../lib/dom.js';
 import { abrirModal, criarMensagem } from '../../components/modal.js';
@@ -75,10 +76,15 @@ export async function renderizarClientes(conteudo, contexto) {
 function montarFiltrados(clientes, filtro) {
   const termo = filtro.toLowerCase();
   if (!termo) return clientes;
+  // Telefones são armazenados canônicos (somente dígitos, F5/M011). Para
+  // manter a busca consistente com formatos digitados "(41) 99999-9999",
+  // o termo e o telefone são comparados de forma normalizada.
+  const termoTfn = normalizarTelefone(termo);
   return clientes.filter(
     (c) =>
       (c.nome || '').toLowerCase().includes(termo) ||
       (c.telefone || '').toLowerCase().includes(termo) ||
+      (termoTfn && normalizarTelefone(c.telefone || '').includes(termoTfn)) ||
       (c.email || '').toLowerCase().includes(termo)
   );
 }

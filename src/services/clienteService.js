@@ -43,9 +43,11 @@ export async function criarCliente(dados) {
 
   // A criação (admin E barbeiro) passa SOMENTE pela RPC public.criar_cliente:
   // barbearia_id é derivado do auth.uid() no banco — nunca do payload.
+  // O telefone é normalizado (somente dígitos) ANTES do envio (F5/M011);
+  // a RPC e o trigger repetem a normalização como defesa em profundidade.
   const { data, error } = await supabase.rpc('criar_cliente', {
     p_nome: normalizarTexto(dados.nome, true),
-    p_telefone: normalizarTexto(dados.telefone, true),
+    p_telefone: normalizarTelefone(dados.telefone),
     p_email: normalizarTextoOpcional(dados.email),
     p_observacoes: normalizarTextoOpcional(dados.observacoes),
     p_ativo: Boolean(dados.ativo),
@@ -65,7 +67,7 @@ export async function atualizarCliente(id, dados) {
     .from('clientes')
     .update({
       nome: normalizarTexto(dados.nome, true),
-      telefone: normalizarTexto(dados.telefone, true),
+      telefone: normalizarTelefone(dados.telefone),
       email: normalizarTextoOpcional(dados.email),
       observacoes: normalizarTextoOpcional(dados.observacoes),
       ativo: Boolean(dados.ativo),
@@ -101,11 +103,12 @@ export async function editarClienteBarbeiro(id, dados) {
   // Única via de edição do barbeiro: RPC public.editar_cliente (M007).
   // A RPC NÃO aceita p_ativo nem p_barbearia_id: a barbearia é derivada
   // do auth.uid() no banco; ativo e created_at jamais são tocados; o
-  // servidor rejeita cliente de outra barbearia.
+  // servidor rejeita cliente de outra barbearia. Telefone normalizado
+  // (somente dígitos) antes do envio (F5/M011).
   const { data, error } = await supabase.rpc('editar_cliente', {
     p_cliente_id: id,
     p_nome: normalizarTexto(dados.nome, true),
-    p_telefone: normalizarTexto(dados.telefone, true),
+    p_telefone: normalizarTelefone(dados.telefone),
     p_email: normalizarTextoOpcional(dados.email),
     p_observacoes: normalizarTextoOpcional(dados.observacoes),
   });
