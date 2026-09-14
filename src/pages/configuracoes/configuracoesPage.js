@@ -35,27 +35,30 @@ export async function renderizarConfiguracoes(conteudo, contexto) {
     );
   }
 
+  const abas = criarElemento('div', { class: 'config-abas' }, [
+    criarElemento('button', { type: 'button', class: 'config-aba ativo', 'data-alvo': 'horarios', text: 'Horários' }),
+    criarElemento('button', { type: 'button', class: 'config-aba', 'data-alvo': 'bloqueios', text: 'Bloqueios' }),
+  ]);
   const secaoHorarios = criarElemento('section', { class: 'config-secao' });
-  const secaoBloqueios = criarElemento('section', { class: 'config-secao' });
-  conteudo.append(secaoHorarios, secaoBloqueios);
+  const secaoBloqueios = criarElemento('section', { class: 'config-secao oculto' });
+  conteudo.append(abas, secaoHorarios, secaoBloqueios);
+
+  function irParaTab(alvo) {
+    secaoHorarios.classList.toggle('oculto', alvo !== 'horarios');
+    secaoBloqueios.classList.toggle('oculto', alvo !== 'bloqueios');
+    abas.querySelectorAll('.config-aba').forEach((a) => a.classList.toggle('ativo', a.dataset.alvo === alvo));
+  }
+
+  abas.querySelectorAll('.config-aba').forEach((aba) => {
+    aba.addEventListener('click', () => irParaTab(aba.dataset.alvo));
+  });
 
   // Horários e Bloqueios carregam de forma independente: uma seção nunca
   // bloqueia a renderização da outra.
   await Promise.all([
     renderizarHorarios(secaoHorarios, { ehAdmin }),
-    renderizarBloqueios(secaoBloqueios, { ehAdmin }),
+    renderizarBloqueios(secaoBloqueios, { ehAdmin, aoVoltarHorarios: () => irParaTab('horarios') }),
   ]);
-
-  // Abas ligadas APÓS o render: os botões .config-aba só existem depois que
-  // renderizarHorarios os cria. Ligá-los antes resultava em nenhum listener.
-  conteudo.querySelectorAll('.config-aba').forEach((aba) => {
-    aba.addEventListener('click', () => {
-      const alvo = aba.dataset.alvo;
-      secaoHorarios.classList.toggle('oculto', alvo !== 'horarios');
-      secaoBloqueios.classList.toggle('oculto', alvo !== 'bloqueios');
-      conteudo.querySelectorAll('.config-aba').forEach((a) => a.classList.toggle('ativo', a === aba));
-    });
-  });
 }
 
 // ------------------------- HORÁRIOS DE FUNCIONAMENTO -------------------------
@@ -64,12 +67,8 @@ async function renderizarHorarios(secao, { ehAdmin }) {
   const titulo = criarElemento('div', { class: 'config-secao-titulo' }, [
     criarElemento('h2', { text: 'Horários de funcionamento' }),
   ]);
-  const abas = criarElemento('div', { class: 'config-abas' }, [
-    criarElemento('button', { type: 'button', class: 'config-aba ativo', 'data-alvo': 'horarios', text: 'Horários' }),
-    criarElemento('button', { type: 'button', class: 'config-aba', 'data-alvo': 'bloqueios', text: 'Bloqueios' }),
-  ]);
   const area = criarElemento('div');
-  secao.append(abas, titulo, area);
+  secao.append(titulo, area);
 
   // Dias com estado padrão para montar a estrutura imediatamente, antes de o
   // carregamento dos dados chegar.
@@ -211,17 +210,21 @@ function validarHorario(abertura, fechamento) {
 
 // ------------------------- BLOQUEIOS DE AGENDA -------------------------
 
-async function renderizarBloqueios(secao, { ehAdmin }) {
+async function renderizarBloqueios(secao, { ehAdmin, aoVoltarHorarios }) {
   const bloco = criarElemento('div');
   secao.append(bloco);
 
-  await carregarBloqueios(bloco, { ehAdmin });
+  await carregarBloqueios(bloco, { ehAdmin, aoVoltarHorarios });
 }
 
-async function carregarBloqueios(bloco, { ehAdmin }) {
+async function carregarBloqueios(bloco, { ehAdmin, aoVoltarHorarios }) {
   bloco.innerHTML = '';
   const estado = criarEstado('Carregando bloqueios…');
   bloco.append(estado);
+
+  const btnVoltar = criarElemento('button', { type: 'button', class: 'btn btn-ghost', id: 'btn-voltar-horarios', text: '← Voltar para Horários' });
+  btnVoltar.addEventListener('click', () => aoVoltarHorarios());
+  bloco.append(btnVoltar);
 
   const cabecalho = criarElemento('div', { class: 'bloqueios-cabecalho' }, [
     criarElemento('div', { class: 'config-secao-titulo' }, [criarElemento('h2', { text: 'Bloqueios de agenda' })]),
@@ -241,7 +244,7 @@ async function carregarBloqueios(bloco, { ehAdmin }) {
         bloqueio: null,
         profissionais: ativos,
         aoSalvar: criarBloqueio,
-        aoFechar: () => carregarBloqueios(bloco, { ehAdmin }),
+        aoFechar: () => carregarBloqueios(bloco, { ehAdmin, aoVoltarHorarios }),
       });
     });
   }
@@ -287,7 +290,7 @@ async function carregarBloqueios(bloco, { ehAdmin }) {
       bloqueio,
       profissionais: ativos,
       aoSalvar: (dados) => atualizarBloqueio(bloqueio.id, dados),
-      aoFechar: () => carregarBloqueios(bloco, { ehAdmin }),
+      aoFechar: () => carregarBloqueios(bloco, { ehAdmin, aoVoltarHorarios }),
     });
   }
 
@@ -303,7 +306,7 @@ async function carregarBloqueios(bloco, { ehAdmin }) {
         } catch (erro) {
           throw new Error(mensagemErroBloqueio(erro));
         }
-        carregarBloqueios(bloco, { ehAdmin });
+        carregarBloqueios(bloco, { ehAdmin, aoVoltarHorarios });
       },
     });
   }

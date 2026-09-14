@@ -644,6 +644,10 @@
   margin: 0 0 16px;
 }
 
+#btn-voltar-horarios {
+  margin-bottom: 16px;
+}
+
 .bloqueios-cabecalho {
   display: flex;
   align-items: flex-start;
