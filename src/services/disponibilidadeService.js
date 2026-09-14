@@ -47,16 +47,36 @@ export async function obterBloqueiosAplicaveis(data, barbeiroId) {
   return doDia.filter((b) => !b.barbeiro_id || b.barbeiro_id === barbeiroId);
 }
 
+// Minutos desde a meia-noite (para comparar só o horário do dia).
+function minutosDoDia(data) {
+  return data.getHours() * 60 + data.getMinutes();
+}
+
 // Verifica se o intervalo [inicio, fim] sobrepõe algum bloqueio.
 // Retorna o primeiro bloqueio que conflita (ou null).
+//  * PONTUAL: comparação de timestamps absolutos (sobreposição real).
+//  * RECORRENTE: comparação do HORÁRIO DO DIA (a data é só referência).
 function bloqueioEmConflito(inicio, fim, bloqueios) {
-  const ini = inicio.getTime();
-  const f = fim.getTime();
+  const iniMs = inicio.getTime();
+  const fimMs = fim.getTime();
+  const iniMin = minutosDoDia(inicio);
+  const fimMin = minutosDoDia(fim);
   return bloqueios.find((b) => {
+    if (Array.isArray(b.recorrencia_dias) && b.recorrencia_dias.length) {
+      const bIniMin = minutosDoDia(new Date(b.inicio));
+      const bFimMin = minutosDoDia(new Date(b.fim));
+      // Mesmo dia: sobreposição simples de horários.
+      if (bFimMin > bIniMin) {
+        return iniMin < bFimMin && fimMin > bIniMin;
+      }
+      // Bloqueio que cruza a meia-noite: conflita se o agendamento cai
+      // depois do início OU antes do fim (no relógio).
+      return iniMin < bFimMin || fimMin > bIniMin;
+    }
     const bIni = new Date(b.inicio).getTime();
     const bFim = new Date(b.fim).getTime();
     // Sobreposição real: inicio < fimBloqueio E fim > inicioBloqueio.
-    return ini < bFim && f > bIni;
+    return iniMs < bFim && fimMs > bIni;
   }) || null;
 }
 

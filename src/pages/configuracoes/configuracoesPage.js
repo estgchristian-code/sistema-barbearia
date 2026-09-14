@@ -330,11 +330,13 @@ function montarCartaoBloqueio(bloqueio, profissionais, { ehAdmin, aoEditar, aoEx
   const card = criarElemento('article', {
     class: bloqueio.barbeiro_id ? 'bloqueio-card especifico' : 'bloqueio-card geral',
   }, [
-    criarElemento('div', { class: 'bloqueio-card-periodo' }, [
-      criarElemento('strong', { text: formatarDatetime(bloqueio.inicio) }),
-      criarElemento('span', { text: 'até' }),
-      criarElemento('strong', { text: formatarDatetime(bloqueio.fim) }),
-    ]),
+    criarElemento('div', { class: 'bloqueio-card-periodo' }, bloqueioEhRecorrente(bloqueio)
+      ? [criarElemento('strong', { text: formatarPeriodoRecorrente(bloqueio) })]
+      : [
+        criarElemento('strong', { text: formatarDatetime(bloqueio.inicio) }),
+        criarElemento('span', { text: 'até' }),
+        criarElemento('strong', { text: formatarDatetime(bloqueio.fim) }),
+      ]),
     criarElemento('div', { class: 'bloqueio-card-info' }, [
       criarElemento('span', {
         class: bloqueio.barbeiro_id ? 'badge badge-info' : 'badge badge-neutral',
@@ -370,17 +372,71 @@ function abrirModalBloqueio({ bloqueio = null, profissionais, aoSalvar, aoFechar
   // há validação em JavaScript, que é a autoridade real).
   campoTempoInicio.data.min = formatarDataInput(new Date());
 
+  // ----------------------------- Recorrência -----------------------------
+
+  const chkRecorrente = criarElemento('input', { type: 'checkbox', id: 'bloqueio-recorrente' });
+  const rotuloRecorrente = criarElemento('label', { class: 'bloqueio-recorrente-rotulo' }, [
+    chkRecorrente,
+    criarElemento('span', { text: 'Recorrente (repete toda semana)' }),
+  ]);
+
+  const caixasDias = [];
+  const seletorDias = criarElemento('div', { class: 'bloqueio-dias-seletor oculto' });
+  for (let d = 0; d <= 6; d++) {
+    const chk = criarElemento('input', { type: 'checkbox', value: String(d) });
+    caixasDias[d] = chk;
+    seletorDias.append(
+      criarElemento('label', { class: 'bloqueio-dia-opcao' }, [chk, criarElemento('span', { text: DIAS_CURTOS[d] })])
+    );
+  }
+  const campoDias = criarElemento('div', { class: 'form-field oculto' }, [
+    criarElemento('span', { class: 'form-field-label', text: 'Dias da semana' }),
+    seletorDias,
+  ]);
+
+  const inputRepetirAte = criarElemento('input', { type: 'date', name: 'repetir_ate', class: 'input', 'aria-label': 'Repetir até (opcional)' });
+  const campoRepetirAte = criarCampoFormulario('Repetir até (opcional)', inputRepetirAte);
+  campoRepetirAte.classList.add('oculto');
+
+  // No modo recorrente, a DATA dos campos é apenas referência/origem: somente
+  // o horário do dia é considerado na recorrência (a data fica desabilitada).
+  function sincronizarRecorrencia() {
+    const ativo = chkRecorrente.checked;
+    campoDias.classList.toggle('oculto', !ativo);
+    campoRepetirAte.classList.toggle('oculto', !ativo);
+    campoTempoInicio.data.disabled = ativo;
+    campoTempoFim.data.disabled = ativo;
+    if (ativo && !campoTempoInicio.data.value) {
+      const hoje = formatarDataInput(new Date());
+      campoTempoInicio.data.value = hoje;
+      campoTempoFim.data.value = hoje;
+    }
+  }
+  chkRecorrente.addEventListener('change', sincronizarRecorrencia);
+
   if (ehEdicao) {
     if (bloqueio.barbeiro_id) selBarbeiro.value = String(bloqueio.barbeiro_id);
     parcDataHora(campoTempoInicio, new Date(bloqueio.inicio));
     parcDataHora(campoTempoFim, new Date(bloqueio.fim));
     if (bloqueio.motivo) areaMotivo.value = bloqueio.motivo;
+    if (bloqueioEhRecorrente(bloqueio)) {
+      chkRecorrente.checked = true;
+      for (const d of bloqueio.recorrencia_dias) {
+        const chk = caixasDias[d];
+        if (chk) chk.checked = true;
+      }
+      if (bloqueio.recorrencia_fim) inputRepetirAte.value = bloqueio.recorrencia_fim;
+    }
   }
+  sincronizarRecorrencia();
 
   const form = criarElemento('form', { id: 'form-bloqueio' }, [
     criarCampoFormulario('Barbeiro (opcional)', selBarbeiro),
+    rotuloRecorrente,
+    campoDias,
     campoTempoInicio.wrapper,
     campoTempoFim.wrapper,
+    campoRepetirAte,
     criarCampoFormulario('Motivo', areaMotivo),
     msgErro,
   ]);
@@ -404,6 +460,11 @@ function abrirModalBloqueio({ bloqueio = null, profissionais, aoSalvar, aoFechar
     msgErro.limpar();
 
     const barbeiroId = selBarbeiro.value ? Number(selBarbeiro.value) : null;
+    const recorrente = chkRecorrente.checked;
+    const dias = recorrente
+      ? DIAS_SEMANA.filter((d) => caixasDias[d.dia_semana].checked).map((d) => d.dia_semana)
+      : [];
+    const recorrenciaFim = recorrente && inputRepetirAte.value ? inputRepetirAte.value : null;
 
     const inicioCombinado = combinarDataHora(campoTempoInicio);
     const fimCombinado = combinarDataHora(campoTempoFim);
@@ -418,7 +479,10 @@ function abrirModalBloqueio({ bloqueio = null, profissionais, aoSalvar, aoFechar
     const inicio = inicioCombinado.date;
     const fim = fimCombinado.date;
 
-    const erro = validarBloqueio({ barbeiroId, inicio, fim, motivo: areaMotivo.value.trim() }, profissionais);
+    const erro = validarBloqueio(
+      { barbeiroId, inicio, fim, motivo: areaMotivo.value.trim(), recorrente, dias, recorrenciaFim },
+      profissionais
+    );
     if (erro) {
       msgErro.definir(erro);
       return;
@@ -427,7 +491,14 @@ function abrirModalBloqueio({ bloqueio = null, profissionais, aoSalvar, aoFechar
     btnSalvar.disabled = true;
     btnSalvar.textContent = ehEdicao ? 'Salvando…' : 'Criando…';
     try {
-      await aoSalvar({ barbeiro_id: barbeiroId, inicio, fim, motivo: areaMotivo.value.trim() });
+      await aoSalvar({
+        barbeiro_id: barbeiroId,
+        inicio,
+        fim,
+        motivo: areaMotivo.value.trim(),
+        recorrencia_dias: dias,
+        recorrencia_fim: recorrenciaFim,
+      });
       modal.fechar();
     } catch (e) {
       msgErro.definir(mensagemErroBloqueio(e));
@@ -444,15 +515,29 @@ function abrirModalBloqueio({ bloqueio = null, profissionais, aoSalvar, aoFechar
   });
 }
 
-function validarBloqueio({ barbeiroId, inicio, fim, motivo }, profissionais) {
+function validarBloqueio({ barbeiroId, inicio, fim, motivo, recorrente, dias, recorrenciaFim }, profissionais) {
   if (!inicio || !inputValido(inicio)) return 'Informe a data e a hora de início.';
   if (!fim || !inputValido(fim)) return 'Informe a data e a hora de fim.';
 
-  // O início deve ser futuro (não pode começar no passado).
-  const agora = new Date();
-  if (inicio <= agora) return 'O início do bloqueio deve estar no futuro.';
+  if (recorrente) {
+    if (!dias || !dias.length) return 'Selecione ao menos um dia da semana para a recorrência.';
+  } else {
+    // O início deve ser futuro (não pode começar no passado). No modo
+    // recorrente isso não se aplica: o horário se repete em dias futuros.
+    const agora = new Date();
+    if (inicio <= agora) return 'O início do bloqueio deve estar no futuro.';
+  }
 
   if (fim <= inicio) return 'O horário de fim deve ser posterior ao horário de início.';
+
+  if (recorrente && recorrenciaFim) {
+    const fimRec = new Date(`${recorrenciaFim}T00:00:00`);
+    if (Number.isNaN(fimRec.getTime())) return '"Repetir até" é uma data inválida.';
+    const refInicio = new Date(`${formatarDataInput(inicio)}T00:00:00`);
+    if (fimRec.getTime() < refInicio.getTime()) {
+      return '"Repetir até" deve ser a partir da data inicial do bloqueio.';
+    }
+  }
 
   if (barbeiroId) {
     const selecionado = profissionais.find((p) => p.id === barbeiroId);
@@ -482,7 +567,57 @@ function formatarDatetime(iso) {
 
 function formatarPeriodo(bloqueio) {
   if (!bloqueio) return '';
+  if (bloqueioEhRecorrente(bloqueio)) return formatarPeriodoRecorrente(bloqueio);
   return formatarDatetime(bloqueio.inicio);
+}
+
+// ------------------------- Helpers de recorrência -------------------------
+
+const DIAS_CURTOS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+function bloqueioEhRecorrente(bloqueio) {
+  return Array.isArray(bloqueio?.recorrencia_dias) && bloqueio.recorrencia_dias.length > 0;
+}
+
+function formatarHoraMinutal(data) {
+  const h = String(data.getHours()).padStart(2, '0');
+  const m = String(data.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function formatarDataRecorrenciaFim(bloqueio) {
+  if (!bloqueio.recorrencia_fim) return '';
+  const partes = String(bloqueio.recorrencia_fim).split('-'); // 'YYYY-MM-DD'
+  if (partes.length !== 3) return String(bloqueio.recorrencia_fim);
+  return `${partes[2]}/${partes[1]}/${partes[0]}`;
+}
+
+// Agrupa dias consecutivos: [1,2,3,4,5] -> "Seg a Sex"; [1,3] -> "Seg, Qua".
+function rotuloDiasSemana(dias) {
+  const ordenados = [...dias].sort((a, b) => a - b);
+  const partes = [];
+  let i = 0;
+  while (i < ordenados.length) {
+    let j = i;
+    while (j + 1 < ordenados.length && ordenados[j + 1] === ordenados[j] + 1) j++;
+    if (i === j) {
+      partes.push(DIAS_CURTOS[ordenados[i]]);
+    } else {
+      partes.push(`${DIAS_CURTOS[ordenados[i]]} a ${DIAS_CURTOS[ordenados[j]]}`);
+    }
+    i = j + 1;
+  }
+  return partes.join(', ');
+}
+
+// Ex.: "🔁 Seg a Sáb · 12:00–13:00" e, quando "Repetir até" foi informada,
+// " · até 31/12/2026".
+function formatarPeriodoRecorrente(bloqueio) {
+  const dias = rotuloDiasSemana(bloqueio.recorrencia_dias);
+  const inicio = formatarHoraMinutal(new Date(bloqueio.inicio));
+  const fim = formatarHoraMinutal(new Date(bloqueio.fim));
+  const ate = formatarDataRecorrenciaFim(bloqueio);
+  return `🔁 ${dias} · ${inicio}–${fim}${ate ? ` · até ${ate}` : ''}`;
 }
 
 // Cria os campos separados de data + hora para um dos extremos do bloqueio.

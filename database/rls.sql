@@ -1043,13 +1043,50 @@ BEGIN
             USING ERRCODE = 'P0001';
     END IF;
 
+    -- 3) Bloqueios PONTUAIS (recorrencia_dias IS NULL) — comparação exata de
+    -- timestamps (sobreposição real), idêntica à validação original.
     IF EXISTS (
         SELECT 1
           FROM public.bloqueios_agenda b
          WHERE b.barbearia_id = NEW.barbearia_id
+           AND b.recorrencia_dias IS NULL
            AND (b.barbeiro_id IS NULL OR b.barbeiro_id = NEW.barbeiro_id)
            AND b.inicio < NEW.data_hora_fim
            AND b.fim    > NEW.data_hora_inicio
+    ) THEN
+        RAISE EXCEPTION 'Este horário está bloqueado para este barbeiro.'
+            USING ERRCODE = 'P0001';
+    END IF;
+
+    -- 3b) Bloqueios RECORRENTES (recorrencia_dias IS NOT NULL): repetem toda
+    -- semana naqueles dias da semana, no horário-do-dia de inicio~fim (a data
+    -- dos campos é só referência), até recorrencia_fim quando informada.
+    -- O dia da semana e os minutos são calculados no FUSO LOCAL da barbearia.
+    IF EXISTS (
+        SELECT 1
+          FROM public.bloqueios_agenda b
+          CROSS JOIN LATERAL (
+              SELECT (extract(hour FROM b.inicio)::int * 60
+                      + extract(minute FROM b.inicio)::int) AS b_ini,
+                     (extract(hour FROM b.fim)::int * 60
+                      + extract(minute FROM b.fim)::int)    AS b_fim
+          ) t
+         WHERE b.barbearia_id = NEW.barbearia_id
+           AND b.recorrencia_dias IS NOT NULL
+           AND (b.barbeiro_id IS NULL OR b.barbeiro_id = NEW.barbeiro_id)
+           AND (b.recorrencia_fim IS NULL
+                OR b.recorrencia_fim >= (NEW.data_hora_inicio AT TIME ZONE v_tz)::date)
+           AND v_dia = ANY (b.recorrencia_dias)
+           AND (
+               -- Bloqueio no mesmo dia do agendamento: sobreposição simples.
+               (t.b_ini < v_fim_min AND t.b_fim > v_inicio_min)
+               OR
+               -- Bloqueio que cruza a meia-noite (fim "antes" do início no
+               -- relógio): conflita se o agendamento cai depois do início
+               -- OU antes do fim.
+               (t.b_fim <= t.b_ini
+                AND (v_inicio_min < t.b_fim OR v_fim_min > t.b_ini))
+           )
     ) THEN
         RAISE EXCEPTION 'Este horário está bloqueado para este barbeiro.'
             USING ERRCODE = 'P0001';

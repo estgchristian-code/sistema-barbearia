@@ -635,6 +635,10 @@
   display: none;
 }
 
+.oculto {
+  display: none;
+}
+
 .config-secao-titulo h2 {
   font-size: var(--font-size-xl);
   margin: 0 0 16px;
@@ -778,6 +782,35 @@
   margin-left: auto;
   display: flex;
   gap: 8px;
+}
+
+/* Modal de bloqueio — recorrência */
+.bloqueio-recorrente-rotulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-md);
+  cursor: pointer;
+  user-select: none;
+}
+
+.bloqueio-dias-seletor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bloqueio-dia-opcao {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: var(--surface);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  user-select: none;
 }
 
 /* --------------------------- TABELA RESPONSIVA (CARD) -------------------- */
