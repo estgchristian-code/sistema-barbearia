@@ -101,8 +101,8 @@ function parseEntrada(body: unknown): { entrada: Entrada | null; erro?: string }
   }
 
   const senha = String(b.senha ?? "");
-  if (senha.length < 8) {
-    return { entrada: null, erro: "A senha deve ter pelo menos 8 caracteres." };
+  if (senha.length < 12) {
+    return { entrada: null, erro: "A senha deve ter pelo menos 12 caracteres." };
   }
 
   return { entrada: { profissional_id, email, senha } };

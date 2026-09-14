@@ -372,7 +372,7 @@ function abrirModalCriarAcesso(profissional, aoFechar) {
     type: 'password',
     name: 'senha',
     class: 'input',
-    placeholder: 'Mínimo 8 caracteres',
+    placeholder: 'Mínimo 12 caracteres',
     required: true,
   });
 
@@ -408,8 +408,8 @@ function abrirModalCriarAcesso(profissional, aoFechar) {
       msgErro.definir('Informe um e-mail válido.');
       return;
     }
-    if (!senha || senha.length < 8) {
-      msgErro.definir('A senha deve ter pelo menos 8 caracteres.');
+    if (!senha || senha.length < 12) {
+      msgErro.definir('A senha deve ter pelo menos 12 caracteres.');
       return;
     }
 
