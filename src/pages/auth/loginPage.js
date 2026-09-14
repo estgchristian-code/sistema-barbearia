@@ -15,7 +15,6 @@ function montarErroAmigavel(erro) {
   const mapeamento = {
     invalid_credentials: 'E-mail ou senha incorretos.',
     email_not_confirmed: 'E-mail ainda não confirmado. Verifique sua caixa de entrada.',
-    user_not_found: 'Nenhuma conta encontrada com este e-mail.',
     over_request_rate_limit: 'Muitas tentativas. Aguarde alguns instantes.',
   };
   if (mapeamento[codigoErro]) return mapeamento[codigoErro];
