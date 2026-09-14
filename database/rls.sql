@@ -149,6 +149,62 @@ GRANT EXECUTE ON FUNCTION public.usuario_pertence_a_barbearia(bigint) TO authent
 GRANT EXECUTE ON FUNCTION public.usuario_e_admin_da_barbearia(bigint) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.usuario_e_barbeiro_autenticado() TO authenticated;
 
+-- (f) governança de cargo — trigger usado por trg_profissionais_proteger_cargo.
+--     F7.1: um UPDATE comum (admin da própria barbearia) NÃO pode alterar a
+--     coluna cargo; o admin não pode se auto-demover e nenhuma alteração pode
+--     deixar a barbearia sem admin. Só operações que NÃO alteram cargo seguem
+--     normalmente (nome/telefone/ativo/auth_user_id/deleted_at).
+CREATE OR REPLACE FUNCTION public.trf_profissionais_proteger_cargo()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  -- Sem mudança de cargo: fluxo normal (criação de acesso, ativação/desativação
+  -- via admin, soft delete) não é afetado.
+  IF NEW.cargo IS NOT DISTINCT FROM OLD.cargo THEN
+    RETURN NEW;
+  END IF;
+
+  -- 1) Nenhum usuário de aplicação (profissional autenticado — admin ou
+  --    barbeiro da própria barbearia) pode mudar cargo num UPDATE direto.
+  IF public.usuario_pertence_a_barbearia(NEW.barbearia_id) THEN
+    RAISE EXCEPTION 'alteração de cargo é uma operação restrita';
+  END IF;
+
+  -- 2) Defesa em profundidade para canais privilegiados (service_role/
+  --    superuser, em que auth.uid() é nulo): nunca deixar a barbearia sem
+  --    nenhum admin ATIVO quando um admin é rebaixado para barbeiro.
+  IF OLD.cargo = 'admin' AND NEW.cargo = 'barbeiro' THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.profissionais p
+       WHERE p.barbearia_id = OLD.barbearia_id
+         AND p.cargo = 'admin'
+         AND p.ativo = true
+         AND p.deleted_at IS NULL
+         AND p.id <> OLD.id
+    ) THEN
+      RAISE EXCEPTION 'não é possível rebaixar o único administrador da barbearia';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trf_profissionais_proteger_cargo() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.trf_profissionais_proteger_cargo() TO authenticated;
+
+-- Trigger de governança de cargo (F7.1): cria junto da função. Aplica-se a
+-- UPDATE que altere profissionais.cargo; INSERT não dispara (novo profissional
+-- nasce 'barbeiro'). Também pode ser instalado isoladamente via
+-- database/migrations/013_protect_profissionais_cargo.sql.
+DROP TRIGGER IF EXISTS trg_profissionais_proteger_cargo ON public.profissionais;
+
+CREATE TRIGGER trg_profissionais_proteger_cargo
+    BEFORE UPDATE OF cargo ON public.profissionais
+    FOR EACH ROW EXECUTE FUNCTION public.trf_profissionais_proteger_cargo();
+
 -- =====================================================================
 -- 2. REGRA DE TRANSIÇÃO DE STATUS (central, usada pelas funções)
 -- =====================================================================
