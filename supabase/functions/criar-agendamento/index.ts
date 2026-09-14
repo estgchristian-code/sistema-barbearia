@@ -264,9 +264,7 @@ Deno.serve(async (req: Request) => {
     const agendamento = await criarAgendamentoPublico(entrada, inicio);
     console.log("[criar-agendamento] ok", {
       slug: entrada.slug,
-      barbeiro_id: entrada.barbeiro_id,
-      servico_id: entrada.servico_id,
-      inicio: entrada.data_hora_inicio,
+      agendamento_id: agendamento?.id,
     });
     return sucesso(agendamento, headers);
   } catch (err) {
@@ -298,7 +296,10 @@ Deno.serve(async (req: Request) => {
       return erro(422, msg.trim(), headers);
     }
 
-    console.error("[criar-agendamento] erro interno", e);
+    console.error("[criar-agendamento] erro interno", {
+      code: String(e.code ?? ""),
+      mensagem: String(e.message ?? "").slice(0, 500),
+    });
     // Nunca expor stack trace nem detalhes do banco ao cliente.
     return erro(500, "Erro interno ao processar o agendamento.", headers);
   }

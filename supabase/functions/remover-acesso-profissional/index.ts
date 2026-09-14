@@ -216,7 +216,7 @@ Deno.serve(async (req: Request) => {
       console.error(
         "[remover-acesso-profissional] auth error",
         authRes.status,
-        authData,
+        String(authData?.code ?? authData?.msg ?? "").slice(0, 200),
       );
       return erro(500, "Não foi possível remover o usuário de acesso.", headers);
     }
@@ -226,7 +226,10 @@ Deno.serve(async (req: Request) => {
 
     return ok({ removido: true, auth_user_id: authUserId }, headers);
   } catch (err) {
-    console.error("[remover-acesso-profissional] erro interno", err);
+    console.error("[remover-acesso-profissional] erro interno", {
+      code: String((err as { code?: unknown })?.code ?? ""),
+      mensagem: String((err as { message?: unknown })?.message ?? "").slice(0, 500),
+    });
     return erro(500, "Erro interno ao remover acesso.", headers);
   }
 });

@@ -236,13 +236,22 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      console.error("[criar-acesso-profissional] auth error", authRes.status, authData);
+      console.error(
+        "[criar-acesso-profissional] auth error",
+        authRes.status,
+        String(authData?.code ?? authData?.msg ?? "").slice(0, 200),
+      );
       return erro(500, "Erro ao criar usuário de acesso.", headers);
     }
 
     const authUserId = authData?.id;
     if (!authUserId) {
-      console.error("[criar-acesso-profissional] auth response sem id", authData);
+      console.error("[criar-acesso-profissional] auth response sem id", {
+        email_mascarado: String(authData?.email ?? "").replace(
+          /^(.{1,2}).*(@.*)$/,
+          "$1***$2",
+        ),
+      });
       return erro(500, "Erro ao criar usuário de acesso.", headers);
     }
 
@@ -283,7 +292,10 @@ Deno.serve(async (req: Request) => {
 
     return ok({ auth_user_id: authUserId }, headers);
   } catch (err) {
-    console.error("[criar-acesso-profissional] erro interno", err);
+    console.error("[criar-acesso-profissional] erro interno", {
+      code: String((err as { code?: unknown })?.code ?? ""),
+      mensagem: String((err as { message?: unknown })?.message ?? "").slice(0, 500),
+    });
     return erro(500, "Erro interno ao criar acesso.", headers);
   }
 });
