@@ -119,11 +119,29 @@ export function renderizarPainelAdmin(container, contexto, paginas, callbacks = 
   });
 
   // ---- Troca de página ----
-  const renderizarPagina = (chave) => {
+  // A página ativa é refletida na URL (ex.: /configuracoes?aba=bloqueios).
+  // renderizarRota apenas desenha; ativarPagina também grava a URL.
+  function renderizarRota(chave) {
     const fn = paginas[chave];
     if (typeof fn === 'function') fn(conteudo, contexto);
     else renderizarPlaceholder(conteudo, chave);
-  };
+    navLista.querySelectorAll('button[data-page]').forEach((btn) => {
+      const ativo = btn.dataset.page === chave;
+      btn.classList.toggle('ativo', ativo);
+      btn.setAttribute('aria-selected', ativo ? 'true' : 'false');
+    });
+  }
+
+  function nomeRota() {
+    const parte = location.pathname.split('/').filter(Boolean)[0] || '';
+    return Object.prototype.hasOwnProperty.call(paginas, parte) ? parte : 'dashboard';
+  }
+
+  function ativarPagina(chave) {
+    const caminho = `/${chave}`;
+    if (location.pathname !== caminho) history.pushState(null, '', caminho);
+    renderizarRota(chave);
+  }
 
   navLista.addEventListener('click', (evento) => {
     const botao = evento.target.closest('button[data-page]');
@@ -131,14 +149,7 @@ export function renderizarPainelAdmin(container, contexto, paginas, callbacks = 
     ativarPagina(botao.dataset.page);
   });
 
-  function ativarPagina(chave) {
-    navLista.querySelectorAll('button[data-page]').forEach((btn) => {
-      const ativo = btn.dataset.page === chave;
-      btn.classList.toggle('ativo', ativo);
-      btn.setAttribute('aria-selected', ativo ? 'true' : 'false');
-    });
-    renderizarPagina(chave);
-  }
+  window.addEventListener('popstate', () => renderizarRota(nomeRota()));
 
   // ---- Sair ----
   botaoSair.addEventListener('click', async (e) => {
@@ -154,7 +165,7 @@ export function renderizarPainelAdmin(container, contexto, paginas, callbacks = 
     }
   });
 
-  ativarPagina('dashboard');
+  renderizarRota(nomeRota());
 }
 
 function cargoLegivel(cargo) {

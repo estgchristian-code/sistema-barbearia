@@ -35,18 +35,24 @@ export async function renderizarConfiguracoes(conteudo, contexto) {
     );
   }
 
+  const abaInicial = new URLSearchParams(location.search).get('aba') === 'bloqueios'
+    ? 'bloqueios'
+    : 'horarios';
   const abas = criarElemento('div', { class: 'config-abas' }, [
-    criarElemento('button', { type: 'button', class: 'config-aba ativo', 'data-alvo': 'horarios', text: 'Horários' }),
-    criarElemento('button', { type: 'button', class: 'config-aba', 'data-alvo': 'bloqueios', text: 'Bloqueios' }),
+    criarElemento('button', { type: 'button', class: `config-aba${abaInicial === 'horarios' ? ' ativo' : ''}`, 'data-alvo': 'horarios', text: 'Horários' }),
+    criarElemento('button', { type: 'button', class: `config-aba${abaInicial === 'bloqueios' ? ' ativo' : ''}`, 'data-alvo': 'bloqueios', text: 'Bloqueios' }),
   ]);
   const secaoHorarios = criarElemento('section', { class: 'config-secao' });
-  const secaoBloqueios = criarElemento('section', { class: 'config-secao oculto' });
+  const secaoBloqueios = criarElemento('section', { class: `config-secao${abaInicial === 'bloqueios' ? '' : ' oculto'}` });
   conteudo.append(abas, secaoHorarios, secaoBloqueios);
 
   function irParaTab(alvo) {
     secaoHorarios.classList.toggle('oculto', alvo !== 'horarios');
     secaoBloqueios.classList.toggle('oculto', alvo !== 'bloqueios');
     abas.querySelectorAll('.config-aba').forEach((a) => a.classList.toggle('ativo', a.dataset.alvo === alvo));
+    const url = new URL(location.href);
+    url.searchParams.set('aba', alvo);
+    history.pushState(null, '', url.pathname + url.search);
   }
 
   abas.querySelectorAll('.config-aba').forEach((aba) => {
