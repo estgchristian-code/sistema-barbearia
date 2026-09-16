@@ -83,6 +83,29 @@ function extrairToken(req: Request): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Auditoria — registro best-effort de eventos de segurança / admin.
+// Grava via public.registrar_auditoria() (SECURITY DEFINER).
+// Falha de INSERT é logada mas não afeta a resposta ao cliente.
+// ---------------------------------------------------------------------------
+function auditar(
+  barbeariaId: number,
+  evento: string,
+  alvoProfissionalId?: number,
+  detalhes?: Record<string, unknown>,
+  ip?: string | null,
+) {
+  sql`SELECT public.registrar_auditoria(
+    ${barbeariaId}::bigint,
+    ${evento}::text,
+    ${detalhes ? JSON.stringify(detalhes) : null}::jsonb,
+    ${alvoProfissionalId ?? null}::bigint,
+    NULL::bigint,
+    NULL::bigint,
+    ${ip ?? null}::text
+  )`.catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Validação de entrada
 // ---------------------------------------------------------------------------
 interface Entrada {
@@ -155,6 +178,10 @@ Deno.serve(async (req: Request) => {
     return erro(400, erroEntrada ?? "Dados inválidos.", headers);
   }
 
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? req.headers.get("cf-connecting-ip")
+    ?? null;
+
   try {
     // 1) Verificar que o chamador é admin de uma barbearia e obter seu
     //    barbearia_id.
@@ -184,6 +211,7 @@ Deno.serve(async (req: Request) => {
       LIMIT 1
     `;
     if (profs.length === 0) {
+      auditar(barbeariaId, "acesso_falha_remocao", entrada.profissional_id, { motivo: "profissional_excluido_nao_encontrado" }, ip);
       return erro(404, "Profissional excluído não encontrado nesta barbearia.", headers);
     }
 
@@ -191,6 +219,7 @@ Deno.serve(async (req: Request) => {
     //    foi desfeito pelo ON DELETE SET NULL ou nunca existiu).
     const authUserId = profs[0].auth_user_id;
     if (!authUserId) {
+      auditar(barbeariaId, "acesso_removido", entrada.profissional_id, { removido: false, motivo: "sem_vínculo_auth" }, ip);
       return ok({ removido: false, motivo: "sem_vínculo_auth" }, headers);
     }
 
@@ -210,6 +239,7 @@ Deno.serve(async (req: Request) => {
 
       // 404 = usuário Auth já não existe (foi removido por outra via).
       if (authRes.status === 404) {
+        auditar(barbeariaId, "acesso_removido", entrada.profissional_id, { removido: false, motivo: "auth_inexistente" }, ip);
         return ok({ removido: false, motivo: "auth_inexistente" }, headers);
       }
 
@@ -218,11 +248,17 @@ Deno.serve(async (req: Request) => {
         authRes.status,
         String(authData?.code ?? authData?.msg ?? "").slice(0, 200),
       );
+      auditar(barbeariaId, "acesso_falha_remocao", entrada.profissional_id, {
+        motivo: "erro_auth_api",
+        status_auth: authRes.status,
+      }, ip);
       return erro(500, "Não foi possível remover o usuário de acesso.", headers);
     }
 
     // A FK (auth_user_id -> auth.users ON DELETE SET NULL) desvincula
     // automaticamente o auth_user_id. Não há ação extra no banco aqui.
+
+    auditar(barbeariaId, "acesso_removido", entrada.profissional_id, { removido: true }, ip);
 
     return ok({ removido: true, auth_user_id: authUserId }, headers);
   } catch (err) {

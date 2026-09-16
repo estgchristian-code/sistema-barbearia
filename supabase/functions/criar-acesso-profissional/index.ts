@@ -76,6 +76,29 @@ function validarEmail(email: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Auditoria — registro best-effort de eventos de segurança / admin.
+// Grava via public.registrar_auditoria() (SECURITY DEFINER).
+// Falha de INSERT é logada mas não afeta a resposta ao cliente.
+// ---------------------------------------------------------------------------
+function auditar(
+  barbeariaId: number,
+  evento: string,
+  alvoProfissionalId?: number,
+  detalhes?: Record<string, unknown>,
+  ip?: string | null,
+) {
+  sql`SELECT public.registrar_auditoria(
+    ${barbeariaId}::bigint,
+    ${evento}::text,
+    ${detalhes ? JSON.stringify(detalhes) : null}::jsonb,
+    ${alvoProfissionalId ?? null}::bigint,
+    NULL::bigint,
+    NULL::bigint,
+    ${ip ?? null}::text
+  )`.catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Validação de entrada
 // ---------------------------------------------------------------------------
 interface Entrada {
@@ -160,6 +183,10 @@ Deno.serve(async (req: Request) => {
     return erro(400, erroEntrada ?? "Dados inválidos.", headers);
   }
 
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? req.headers.get("cf-connecting-ip")
+    ?? null;
+
   try {
     // 1) Verificar que o chamador é admin de uma barbearia e obter seu
     //    barbearia_id.
@@ -188,9 +215,11 @@ Deno.serve(async (req: Request) => {
       LIMIT 1
     `;
     if (profs.length === 0) {
+      auditar(barbeariaId, "acesso_falha", entrada.profissional_id, { motivo: "profissional_nao_encontrado" }, ip);
       return erro(404, "Profissional não encontrado nesta barbearia.", headers);
     }
     if (profs[0].auth_user_id) {
+      auditar(barbeariaId, "acesso_falha", entrada.profissional_id, { motivo: "ja_possui_acesso" }, ip);
       return erro(
         409,
         "Este profissional já possui acesso ao sistema.",
@@ -229,6 +258,10 @@ Deno.serve(async (req: Request) => {
         msg.toLowerCase().includes("already") ||
         errorDescription.toLowerCase().includes("already")
       ) {
+        auditar(barbeariaId, "acesso_falha", entrada.profissional_id, {
+          motivo: "email_duplicado_auth",
+          email_mascarado: String(entrada.email).replace(/^(.{1,2}).*(@.*)$/, "$1***$2"),
+        }, ip);
         return erro(
           409,
           "Este e-mail já está cadastrado no sistema.",
@@ -241,6 +274,10 @@ Deno.serve(async (req: Request) => {
         authRes.status,
         String(authData?.code ?? authData?.msg ?? "").slice(0, 200),
       );
+      auditar(barbeariaId, "acesso_falha", entrada.profissional_id, {
+        motivo: "erro_auth_api",
+        status_auth: authRes.status,
+      }, ip);
       return erro(500, "Erro ao criar usuário de acesso.", headers);
     }
 
@@ -252,6 +289,9 @@ Deno.serve(async (req: Request) => {
           "$1***$2",
         ),
       });
+      auditar(barbeariaId, "acesso_falha", entrada.profissional_id, {
+        motivo: "auth_response_sem_id",
+      }, ip);
       return erro(500, "Erro ao criar usuário de acesso.", headers);
     }
 
@@ -283,12 +323,20 @@ Deno.serve(async (req: Request) => {
         // Pode ser removido manualmente no Dashboard.
       });
 
+      auditar(barbeariaId, "acesso_falha", entrada.profissional_id, {
+        motivo: "corrida_vincular_auth",
+      }, ip);
       return erro(
         409,
         "Este profissional já possui acesso ao sistema.",
         headers,
       );
     }
+
+    auditar(barbeariaId, "acesso_criado", entrada.profissional_id, {
+      email_mascarado: String(entrada.email).replace(/^(.{1,2}).*(@.*)$/, "$1***$2"),
+      cargo: String(profs[0].cargo ?? ""),
+    }, ip);
 
     return ok({ auth_user_id: authUserId }, headers);
   } catch (err) {
